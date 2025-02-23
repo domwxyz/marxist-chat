@@ -1,4 +1,5 @@
 import feedparser
+from datetime import datetime
 from llama_index.core import VectorStoreIndex, SimpleDirectoryReader, Settings, StorageContext, PromptTemplate, Document, load_index_from_storage
 from llama_index.llms.llama_cpp import LlamaCPP
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
@@ -9,6 +10,7 @@ from pathlib import Path
 import chardet
 import unicodedata
 import faiss
+import ast
 import json
 import os
 import re
@@ -59,6 +61,142 @@ def signal_handler(sig, frame):
     """Handle CTRL + C exit signal"""
     print("\nGoodbye!")
     sys.exit(0)
+    
+def display_menu():
+    """Display the main menu options"""
+    print("\nRSS RAG Bot Menu")
+    print("----------------")
+    print("1. Archive RSS Feed")
+    print("2. Create Vector Store")
+    print("3. Load Vector Store")
+    print("4. Load Chat")
+    print("5. Delete RSS Archive")
+    print("6. Delete Vector Store")
+    print("7. Configuration")  # Add configuration option
+    print("0. Exit")
+    print("\nNote: For first time setup, run options 1, 2, 3, and 4 in order.")
+    
+def display_config_menu():
+    """Display configuration options"""
+    print("\nConfiguration Menu")
+    print("-----------------")
+    print("1. Change Embedding Model")
+    print("2. Change Chat Model")
+    print("3. Change Number of Threads")
+    print("4. Change Temperature")
+    print("5. Add/Remove RSS Feeds")
+    print("0. Back to Main Menu")
+
+def manage_configuration():
+    """Manage program configuration"""
+    global CURRENT_EMBED, CURRENT_LLM, NUM_THREADS, TEMPERATURE, RSS_FEED_URLS
+    
+    while True:
+        display_config_menu()
+        choice = input("\nEnter your choice (0-5): ").strip()
+        
+        if choice == '0':
+            break
+            
+        elif choice == '1':
+            print("\nAvailable embedding models:")
+            print(f"1. BGE-M3 ({BGE_M3})")
+            print(f"2. GTE-Small ({GTE_SMALL})")
+            model_choice = input("Choose model (1-2): ").strip()
+            if model_choice == '1':
+                CURRENT_EMBED = BGE_M3
+            elif model_choice == '2':
+                CURRENT_EMBED = GTE_SMALL
+            print(f"Embedding model set to: {CURRENT_EMBED}")
+            
+        elif choice == '2':
+            print("\nAvailable chat models:")
+            print("1. Qwen 2.5 3B (Smallest)")
+            print("2. Qwen 2.5 7B (Medium)")
+            print("3. Qwen 2.5 14B (Largest)")
+            model_choice = input("Choose model (1-3): ").strip()
+            if model_choice == '1':
+                CURRENT_LLM = QWEN2_5_3B
+            elif model_choice == '2':
+                CURRENT_LLM = QWEN2_5_7B
+            elif model_choice == '3':
+                CURRENT_LLM = QWEN2_5_14B
+            print(f"Chat model set to: {CURRENT_LLM}")
+            
+        elif choice == '3':
+            threads = input("\nEnter number of threads (1-16): ").strip()
+            try:
+                threads = int(threads)
+                if 1 <= threads <= 16:
+                    NUM_THREADS = threads
+                    print(f"Threads set to: {NUM_THREADS}")
+                else:
+                    print("Invalid number of threads. Must be between 1 and 16.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+                
+        elif choice == '4':
+            temp = input("\nEnter temperature (0.0-1.0): ").strip()
+            try:
+                temp = float(temp)
+                if 0.0 <= temp <= 1.0:
+                    TEMPERATURE = temp
+                    print(f"Temperature set to: {TEMPERATURE}")
+                else:
+                    print("Invalid temperature. Must be between 0.0 and 1.0.")
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+                
+        elif choice == '5':
+            print("\nCurrent RSS feeds:")
+            for i, feed in enumerate(RSS_FEED_URLS, 1):
+                print(f"{i}. {feed}")
+            print("\nOptions:")
+            print("1. Add feed")
+            print("2. Remove feed")
+            print("3. Back")
+            feed_choice = input("Choose option: ").strip()
+            
+            if feed_choice == '1':
+                new_feed = input("Enter new RSS feed URL: ").strip()
+                if new_feed and new_feed not in RSS_FEED_URLS:
+                    RSS_FEED_URLS.append(new_feed)
+                    print("Feed added successfully!")
+            elif feed_choice == '2':
+                if len(RSS_FEED_URLS) > 1:
+                    del_idx = input("Enter feed number to remove: ").strip()
+                    try:
+                        del_idx = int(del_idx) - 1
+                        if 0 <= del_idx < len(RSS_FEED_URLS):
+                            removed = RSS_FEED_URLS.pop(del_idx)
+                            print(f"Removed feed: {removed}")
+                        else:
+                            print("Invalid feed number.")
+                    except ValueError:
+                        print("Invalid input. Please enter a number.")
+                else:
+                    print("Cannot remove the last RSS feed.")
+                    
+        else:
+            print("\nInvalid choice. Please try again.")
+    
+def archive_rss_feed():
+    """Archive RSS feed entries"""
+    if CACHE_DIR.exists():
+        response = input("\nRSS archive already exists. Do you want to update it? (y/n): ")
+        if response.lower() != 'y':
+            return
+            
+    print("\nFetching RSS entries...")
+    all_entries = []
+    for feed_url in RSS_FEED_URLS:
+        print(f"Processing {feed_url}")
+        entries = fetch_rss_entries(feed_url)
+        all_entries.extend(entries)
+    
+    print(f"Found {len(all_entries)} total entries")
+    cache_entries(all_entries)
+    print("\nRSS feed archived successfully!")
 
 def fetch_rss_entries(feed_url):
     """Fetch all entries from WordPress RSS feed with pagination"""
@@ -108,47 +246,85 @@ def fetch_rss_entries(feed_url):
     
 def extract_metadata_from_entry(entry):
     """Extract and format metadata from a feedparser entry"""
-    # Extract author information
-    author = "Unknown"
-    if hasattr(entry, 'author'):
-        author = entry.author
-    elif hasattr(entry, 'authors') and entry.authors:
-        author = entry.authors[0].name if hasattr(entry.authors[0], 'name') else entry.authors[0]
+    title = entry.get('title', 'Untitled')
+    published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
+    author = entry.get('author', 'Unknown Author')
+    url = entry.get('link', 'No URL')
 
-    # Extract and parse date
-    published_date = "No Date"
-    if hasattr(entry, 'published'):
-        try:
-            # First try RFC 822 format
-            parsed_time = time.strptime(entry.published, "%a, %d %b %Y %H:%M:%S %z")
-            published_date = time.strftime("%Y-%m-%d %H:%M:%S", parsed_time)
-        except ValueError:
-            try:
-                # Fallback to parsing published_parsed tuple
-                if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    published_date = time.strftime("%Y-%m-%d %H:%M:%S", entry.published_parsed)
-            except Exception as e:
-                print(f"Date parsing error: {e}")
-    
-    # Extract categories/tags
+    formatted_date = format_date(published_date)
     categories = []
+
+    # Process categories
+    if hasattr(entry, 'categories'):
+        # Normalize to list first
+        categories_raw = entry.categories
+        if not isinstance(categories_raw, list):
+            categories_raw = [categories_raw]
+        
+        for cat in categories_raw:
+            try:
+                # Handle category objects
+                if hasattr(cat, 'term'):
+                    category_text = cat.term
+                elif hasattr(cat, 'label'):
+                    category_text = cat.label
+                else:
+                    category_text = str(cat)
+
+                # Split comma-separated values
+                for sub_cat in category_text.split(','):
+                    sub_cat = sub_cat.strip()
+                    if sub_cat:
+                        cleaned = clean_category(sub_cat)
+                        if cleaned:
+                            categories.append(cleaned)
+            except Exception as e:
+                print(f"Error processing category: {e}")
+
+    # Process tags
     if hasattr(entry, 'tags'):
-        categories = [tag.term for tag in entry.tags]
-    elif hasattr(entry, 'categories'):
-        categories = [cat for cat in entry.categories]
-    
-    # Get URL and title
-    url = entry.link if hasattr(entry, 'link') else "No URL"
-    title = entry.title if hasattr(entry, 'title') else "No Title"
-    
+        for tag in entry.tags:
+            try:
+                # Extract tag text properly
+                tag_text = tag.get('term', str(tag))
+                cleaned = clean_category(tag_text)
+                if cleaned:
+                    categories.append(cleaned)
+            except Exception as e:
+                print(f"Error processing tag: {e}")
+
+    # Clean and deduplicate
+    seen = set()
+    unique_categories = []
+    for cat in categories:
+        lower_cat = cat.lower()
+        if lower_cat not in seen and len(cat) > 2:
+            seen.add(lower_cat)
+            unique_categories.append(cat)
+    unique_categories.sort()
+
     return {
         "title": title,
-        "date": published_date,
+        "date": formatted_date,
         "author": author,
         "url": url,
-        "categories": categories
+        "categories": unique_categories
     }
 
+def clean_category(category):
+    """Clean and normalize a category string"""
+    try:
+        category = str(category).strip("'\"[](){}").strip()
+        if len(category) <= 1:
+            return ""
+        # Remove special characters, keep hyphens and spaces
+        category = re.sub(r'[^\w\s-]', '', category)
+        # Capitalize each word
+        category = ' '.join(word.capitalize() for word in category.split())
+        return category if len(category) > 2 else ""
+    except Exception as e:
+        print(f"Error cleaning category: {e}")
+        return ""
 
 def sanitize_filename(title):
     """Sanitize title for filesystem safety with Unicode support"""
@@ -185,11 +361,30 @@ def clean_rss_boilerplate(content):
     if not content:
         return ""
     
-    # Remove "The post ... appeared first on ..." text
-    content = re.sub(r'The post.*?appeared first on.*?\.', '', content)
+    # Handle common RSS boilerplate patterns
+    patterns = [
+        # Original patterns
+        r'The post.*?appeared first on.*?\.',
+        r'<a href="https://communistusa\.org[^>]*>.*?</a>',
+        # New patterns
+        r'org">Revolutionary Communists of America\.',
+        r'org">[^<]*</a>',  # Catches any remaining org"> patterns
+        r'\[ ?to read the full analysis[^\]]*\]',  # Catches "[to read...]" patterns
+        r'\[ ?read more[^\]]*\]',  # Catches "[read more...]" patterns
+        r'Read more\.\.\..*$',  # Catches "Read more..." at end of content
+        r'Continue reading.*$'  # Catches "Continue reading..." at end of content
+    ]
     
-    # Remove links to the main site
-    content = re.sub(r'<a href="https://communistusa\.org[^>]*>.*?</a>', '', content)
+    # Apply each cleanup pattern
+    for pattern in patterns:
+        content = re.sub(pattern, '', content, flags=re.IGNORECASE | re.MULTILINE)
+    
+    # Clean up any resulting blank lines from removed content
+    content = re.sub(r'\n\s*\n\s*\n', '\n\n', content)
+    
+    # Remove extra whitespace while preserving paragraph structure
+    lines = [line.strip() for line in content.splitlines()]
+    content = '\n'.join(line for line in lines if line)
     
     return content.strip()
     
@@ -267,7 +462,6 @@ def preprocess_content(content):
     return content.strip()
     
 def format_metadata(metadata):
-    """Format metadata in a clean, structured way"""
     metadata_block = [
         "---",
         f"Title: {metadata['title']}",
@@ -276,26 +470,48 @@ def format_metadata(metadata):
         f"URL: {metadata['url']}"
     ]
     
-    # Add categories if present
-    if metadata['categories']:
-        metadata_block.append(f"Categories: {', '.join(metadata['categories'])}")
+    if metadata.get('categories'):
+        # Always include Categories line, even if empty
+        categories_str = ', '.join(metadata['categories'])
+        metadata_block.append(f"Categories: {categories_str}")
     
     metadata_block.append("---\n")
+    return '\n'.join(metadata_block)
     
-    return "\n".join(metadata_block)
+def format_date(date_str):
+    """Format RSS date string to YYYY-MM-DD"""
+    if not date_str or date_str == 'Unknown Date':
+        return datetime.now().strftime('%Y-%m-%d')
+        
+    try:
+        # RSS feeds typically use this format
+        dt = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
+        return dt.strftime('%Y-%m-%d')
+    except Exception as e:
+        print(f"Warning: Could not parse date '{date_str}': {e}")
+        return datetime.now().strftime('%Y-%m-%d')
 
 def cache_entries(entries):
     """Store entries in local cache as text files with proper UTF-8 encoding"""
     CACHE_DIR.mkdir(exist_ok=True)
     documents = []
+    last_known_date = datetime.now().strftime('%Y-%m-%d')  # Default fallback
     
     for entry in entries:
         try:
             # Extract metadata from the full feedparser entry
             metadata = extract_metadata_from_entry(entry)
             
-            # Generate safe filename with UTF-8 support
-            date_prefix = metadata['date'][:10]
+            # If we got a valid date, update our last_known_date
+            if metadata['date'] and metadata['date'] != 'Unknown Date':
+                last_known_date = metadata['date']
+            else:
+                # Use the last known date if this entry's date is missing/unknown
+                metadata['date'] = last_known_date
+                print(f"Using fallback date {last_known_date} for entry: {metadata['title']}")
+            
+            # Generate safe filename with UTC-8 support
+            date_prefix = metadata['date']  # Will be either actual date or last_known_date
             safe_title = sanitize_filename(metadata['title'])
             filename = f"{date_prefix}_{safe_title}.txt"
             
@@ -344,6 +560,8 @@ def cache_entries(entries):
         except Exception as e:
             print(f"Error processing entry {entry.get('title', 'unknown')}: {str(e)}")
             continue
+
+    return documents
 
 def ensure_unicode(text):
     if text is None:
@@ -430,53 +648,55 @@ def setup_rag_system():
     if VECTOR_STORE_DIR.exists():
         print(f"Loading existing vector store from {VECTOR_STORE_DIR}")
         try:
-            # Add error handling for file encoding
-            for file in VECTOR_STORE_DIR.glob("*.json"):
-                try:
-                    # First try to read with UTF-8
-                    with open(file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                except UnicodeDecodeError:
-                    # If UTF-8 fails, try to detect encoding
-                    with open(file, 'rb') as f:
-                        raw_data = f.read()
-                    detected = chardet.detect(raw_data)
-                    encoding = detected['encoding']
-                    
-                    # Rewrite file with UTF-8 encoding
-                    with open(file, 'r', encoding=encoding) as f:
-                        content = f.read()
-                    with open(file, 'w', encoding='utf-8') as f:
-                        f.write(content)
-            
-            # Now try to load the index with corrected encoding
             storage_context = StorageContext.from_defaults(persist_dir=VECTOR_STORE_DIR)
             index = load_index_from_storage(
                 storage_context=storage_context,
                 service_context=Settings
             )
             print("Successfully loaded existing index")
-            return index.as_query_engine(
-                similarity_top_k=5,
-                node_postprocessors=[
-                    SimilarityPostprocessor(similarity_cutoff=0.7)
-                ],
-                text_qa_template=query_template
-            )
-            
         except Exception as e:
             print(f"Error loading existing index: {str(e)}")
-            print("Cleaning up corrupted vector store...")
-            try:
-                # Remove corrupted vector store
-                shutil.rmtree(VECTOR_STORE_DIR)
-            except Exception as cleanup_error:
-                print(f"Error cleaning up vector store: {str(cleanup_error)}")
-    
-    print("Creating new vector store...")
-    return create_new_vector_store(embed_model, query_template)
+            print("Creating new vector store...")
+            index = create_vector_store()
+            if not index:
+                raise ValueError("Failed to create vector store")
+    else:
+        print("Creating new vector store...")
+        index = create_vector_store()
+        if not index:
+            raise ValueError("Failed to create vector store")
+            
+    return index.as_query_engine(
+        similarity_top_k=5,
+        node_postprocessors=[
+            SimilarityPostprocessor(similarity_cutoff=0.7)
+        ],
+        text_qa_template=query_template
+    )
 
-def create_new_vector_store(embed_model, query_template):
+def create_vector_store():
+    """Create a new vector store"""
+    if not CACHE_DIR.exists() or not any(CACHE_DIR.iterdir()):
+        print("\nError: No RSS archive found. Please run option 1 first.")
+        return None
+        
+    if VECTOR_STORE_DIR.exists():
+        response = input("\nVector store already exists. Do you want to recreate it? (y/n): ")
+        if response.lower() != 'y':
+            return None
+        try:
+            shutil.rmtree(VECTOR_STORE_DIR)
+        except Exception as e:
+            print(f"\nError deleting existing vector store: {e}")
+            return None
+            
+    print("\nInitializing embedding model...")
+    embed_model = HuggingFaceEmbedding(
+        model_name=CURRENT_EMBED,
+        max_length=256,
+        embed_batch_size=32
+    )
+    
     try:
         VECTOR_STORE_DIR.mkdir(exist_ok=True, parents=True)
         
@@ -486,10 +706,10 @@ def create_new_vector_store(embed_model, query_template):
         
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
+        # Load and validate documents
         documents = []
         for file_path in CACHE_DIR.glob("*.txt"):
             try:
-                # Add check for empty files
                 if file_path.stat().st_size == 0:
                     print(f"Warning: Empty file found: {file_path}")
                     continue
@@ -513,13 +733,12 @@ def create_new_vector_store(embed_model, query_template):
         if not documents:
             raise ValueError("No documents could be loaded from cache directory")
             
-        # Add check for minimum document length
         valid_documents = [doc for doc in documents if len(doc.text.strip()) > 50]
         if not valid_documents:
             raise ValueError("No valid documents found (all documents too short)")
         
         index = VectorStoreIndex.from_documents(
-            valid_documents,  # Use filtered documents
+            valid_documents,
             storage_context=storage_context,
             show_progress=True,
             service_context=Settings
@@ -527,44 +746,82 @@ def create_new_vector_store(embed_model, query_template):
         
         print(f"Saving vector store at {VECTOR_STORE_DIR}")
         index.storage_context.persist(persist_dir=VECTOR_STORE_DIR)
+        print("\nVector store created successfully!")
         
-        return index.as_query_engine(
-            similarity_top_k=5,
-            node_postprocessors=[
-                SimilarityPostprocessor(similarity_cutoff=0.7)
-            ],
-            text_qa_template=query_template
-        )
+        return index
         
     except Exception as e:
-        print(f"Error creating new vector store: {str(e)}")
+        print(f"\nError creating vector store: {e}")
         if VECTOR_STORE_DIR.exists():
             try:
                 shutil.rmtree(VECTOR_STORE_DIR)
             except Exception:
                 pass
-        raise
+        return None
+        
+def load_vector_store():
+    """Load existing vector store"""
+    if not VECTOR_STORE_DIR.exists():
+        print("\nError: No vector store found. Please run option 2 first.")
+        return None
+        
+    print("\nLoading vector store...")
+    try:
+        query_engine = setup_rag_system()
+        print("Vector store loaded successfully!")
+        return query_engine
+    except Exception as e:
+        print(f"\nError loading vector store: {e}")
+        return None
+    
+def load_chat(query_engine):
+    """Start the chat interface"""
+    if not query_engine:
+        print("\nError: No query engine loaded. Please run option 3 first.")
+        return
+        
+    print("\nStarting chat interface. Type 'exit' to return to menu.")
+    while True:
+        query = input("\nQuestion: ").strip()
+        if not query:
+            continue
+        if query.lower() == 'exit':
+            break
+            
+        try:
+            response = query_engine.query(query)
+            formatted_output = format_response(response)
+            print(formatted_output)
+        except Exception as e:
+            print(f"\nError: {e}")
+            
+def delete_rss_archive():
+    """Delete the RSS archive directory"""
+    if not CACHE_DIR.exists():
+        print("\nNo RSS archive found.")
+        return
+        
+    response = input("\nAre you sure you want to delete the RSS archive? (y/n): ")
+    if response.lower() == 'y':
+        try:
+            shutil.rmtree(CACHE_DIR)
+            print("\nRSS archive deleted successfully!")
+        except Exception as e:
+            print(f"\nError deleting RSS archive: {e}")
 
-def create_new_index(embed_model):
-    """Create a new vector store index"""
-    d = 1024 if CURRENT_EMBED == BGE_M3 else 384
-    # Use HNSW for faster approximate search
-    faiss_index = faiss.IndexHNSWFlat(d, 32)
-    vector_store = FaissVectorStore(faiss_index=faiss_index)
-    
-    storage_context = StorageContext.from_defaults(vector_store=vector_store)
-    documents = SimpleDirectoryReader(CACHE_DIR).load_data()
-    
-    index = VectorStoreIndex.from_documents(
-        documents,
-        storage_context=storage_context,
-        show_progress=True,
-        service_context=Settings
-    )
-    
-    print(f"Saving vector store at {VECTOR_STORE_DIR}")
-    index.storage_context.persist(persist_dir=VECTOR_STORE_DIR)
-    return index
+def delete_vector_store():
+    """Delete the vector store directory"""
+    if not VECTOR_STORE_DIR.exists():
+        print("\nNo vector store found.")
+        return
+        
+    response = input("\nAre you sure you want to delete the vector store? (y/n): ")
+    if response.lower() == 'y':
+        try:
+            shutil.rmtree(VECTOR_STORE_DIR)
+            print("\nVector store deleted successfully!")
+        except Exception as e:
+            print(f"\nError deleting vector store: {e}")
     
 def format_response(response):
     """Format response with sources in a clean way"""
@@ -644,43 +901,46 @@ def format_response(response):
 
 def main():
     signal.signal(signal.SIGINT, signal_handler)
-    
-    # Step 1: Fetch and cache RSS content
-    if not CACHE_DIR.exists():
-        print("Fetching RSS entries...")
-        all_entries = []
-        for feed_url in RSS_FEED_URLS:
-            print(f"Processing {feed_url}")
-            entries = fetch_rss_entries(feed_url)
-            all_entries.extend(entries)
-        
-        print(f"Found {len(all_entries)} total entries")
-        cache_entries(all_entries)
-    else:
-        print("\nExisting post cache found. Skipping RSS fetch.")
-    
-    # Step 2: Initialize RAG system
-    print("\nInitializing RAG system...")
-    query_engine = setup_rag_system()
-    
-    # Step 3: Chat interface
-    print("\nRAG system ready! Ask questions about the content. Press Ctrl+C to exit.")
+    query_engine = None
     
     while True:
         try:
-            query = input("\nQuestion: ").strip()
-            if not query:
-                continue
+            display_menu()
+            choice = input("\nEnter your choice (0-7): ").strip()  # Update range
+            
+            if choice == '0':
+                print("\nGoodbye!")
+                break
                 
-            # Get response with sources
-            response = query_engine.query(query)
-            
-            # Format and print the response
-            formatted_output = format_response(response)
-            print(formatted_output)
-            
+            elif choice == '1':
+                archive_rss_feed()
+                
+            elif choice == '2':
+                create_vector_store()
+                
+            elif choice == '3':
+                query_engine = load_vector_store()
+                
+            elif choice == '4':
+                load_chat(query_engine)
+                
+            elif choice == '5':
+                delete_rss_archive()
+                
+            elif choice == '6':
+                delete_vector_store()
+                query_engine = None  # Reset query engine if vector store is deleted
+                
+            elif choice == '7':  # Add configuration option
+                manage_configuration()
+                
+            else:
+                print("\nInvalid choice. Please try again.")
+                
+        except KeyboardInterrupt:
+            print("\nOperation cancelled.")
         except Exception as e:
-            print(f"Error: {str(e)}")
+            print(f"\nAn error occurred: {e}")
 
 if __name__ == "__main__":
     main()

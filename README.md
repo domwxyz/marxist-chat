@@ -14,6 +14,7 @@ A Python script that creates a local RAG (Retrieval Augmented Generation) chatbo
   llama-index-vector-stores-faiss
   faiss-cpu
   feedparser
+  chardet
   ```
 
 ## Installation
@@ -21,7 +22,7 @@ A Python script that creates a local RAG (Retrieval Augmented Generation) chatbo
 
 Install the required packages:
 ```bash
-pip install llama-index-core llama-index-llms-llama-cpp llama-index-embeddings-huggingface llama-index-vector-stores-faiss faiss-cpu feedparser
+pip install llama-index-core llama-index-llms-llama-cpp llama-index-embeddings-huggingface llama-index-vector-stores-faiss faiss-cpu feedparser chardet
 ```
 
 ## Usage

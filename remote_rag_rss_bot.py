@@ -5,13 +5,10 @@ from llama_index.llms.llama_cpp import LlamaCPP
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.core.node_parser import SimpleNodeParser, SentenceSplitter
 from llama_index.core.postprocessor import SimilarityPostprocessor
-from llama_index.vector_stores.faiss import FaissVectorStore
 from pathlib import Path
 import chardet
 import unicodedata
-import faiss
 import ast
-import json
 import os
 import re
 import signal
@@ -252,8 +249,8 @@ def extract_metadata_from_entry(entry):
     url = entry.get('link', 'No URL')
     formatted_date = format_date(published_date)
     
-    # Initialize categories set to avoid duplicates
-    categories = set()
+    # Initialize categories list instead of set
+    categories = []
     
     # Process tags field
     if hasattr(entry, 'tags'):
@@ -264,53 +261,53 @@ def extract_metadata_from_entry(entry):
             else:
                 tag_text = str(tag)
 
-            # Clean and split tags containing commas
-            cleaned_tags = []
+            # Clean tag and add if valid
             if ',' in tag_text:
                 # Split and clean individual categories
                 for raw_cat in tag_text.split(','):
                     cleaned = clean_category(raw_cat)
-                    if cleaned:
-                        cleaned_tags.append(cleaned)
+                    if cleaned and cleaned not in categories:
+                        categories.append(cleaned)
             else:
                 cleaned = clean_category(tag_text)
-                if cleaned:
-                    cleaned_tags.append(cleaned)
-            
-            # Add valid categories to the set
-            for valid_cat in cleaned_tags:
-                categories.add(valid_cat)
+                if cleaned and cleaned not in categories:
+                    categories.append(cleaned)
     
     # Process category field, handling both single and multiple categories
     if hasattr(entry, 'category'):
-        categories_list = entry.category if isinstance(entry.category, list) else [entry.category]
-        for cat in categories_list:
-            cleaned = clean_category(cat)
-            if cleaned:
-                categories.add(cleaned)
-    
-    # Convert set to sorted list
-    categories = sorted(categories)
+        # Handle string or list
+        if isinstance(entry.category, str):
+            cleaned = clean_category(entry.category)
+            if cleaned and cleaned not in categories:
+                categories.append(cleaned)
+        elif isinstance(entry.category, list):
+            for cat in entry.category:
+                cleaned = clean_category(cat)
+                if cleaned and cleaned not in categories:
+                    categories.append(cleaned)
     
     return {
         "title": title,
         "date": formatted_date,
         "author": author,
         "url": url,
-        "categories": categories
+        "categories": categories  # Now a normal list of strings
     }
+
 
 def clean_category(category):
     """Clean and normalize a category string"""
     if not category:
         return ""
     
-    if isinstance(category, str):
-        # Remove any surrounding brackets and quotes
-        category = category.strip('[]\'\"')
+    # Force to string and handle various wrapper characters
+    if not isinstance(category, str):
+        category = str(category)
+        
+    # Remove brackets, quotes, etc. from the entire string
+    category = category.strip('[]\'\"')
+    category = category.strip()
     
-    # Convert to string and clean
-    category = str(category).strip()
     if not category:
         return ""
     
@@ -454,7 +451,7 @@ def preprocess_content(content):
     content = re.sub(r'\n{3,}', '\n\n', content)
     
     # Normalize Unicode forms
-    content = unicodedata.normalize('NFKD', content)
+    content = unicodedata.normalize('NFKC', content)  # Changed from NFKD to NFKC for better encoding stability
     
     # Clean up lines while preserving structure
     content = '\n'.join(line.strip() for line in content.splitlines())
@@ -526,10 +523,12 @@ def cache_entries(entries):
             # Extract content sections with explicit encoding handling
             description, content = extract_content_sections(entry)
             
-            # Ensure all text is properly encoded
-            metadata_formatted = format_metadata({
-                k: ensure_unicode(v) for k, v in metadata.items()
-            })
+            # Create metadata text block, ensuring categories are formatted properly
+            # This is the critical fix: directly use the format_metadata function with raw metadata
+            # instead of ensuring_unicode on each value, which corrupts the list structure
+            metadata_formatted = format_metadata(metadata)
+            
+            # Ensure text content is properly encoded
             description = ensure_unicode(description)
             content = ensure_unicode(content)
             
@@ -545,10 +544,10 @@ def cache_entries(entries):
             # Join with proper line endings
             document_text = '\n'.join(full_content)
             
-            # Create document object with explicit encoding
+            # Create document object
             doc = Document(
                 text=document_text,
-                metadata=metadata
+                metadata=metadata  # Use the original metadata object
             )
             documents.append(doc)
             
@@ -580,7 +579,7 @@ def ensure_unicode(text):
                 return text.decode('utf-8', errors='replace')
     
     if isinstance(text, str):
-        return unicodedata.normalize('NFKD', text)
+        return unicodedata.normalize('NFKC', text)
         
     return str(text)
 
@@ -674,7 +673,7 @@ def setup_rag_system():
     )
 
 def create_vector_store():
-    """Create a new vector store with CPU optimizations"""
+    """Create a new vector store with simpler in-memory approach"""
     if not CACHE_DIR.exists() or not any(CACHE_DIR.iterdir()):
         print("\nError: No RSS archive found. Please run option 1 first.")
         return None
@@ -703,14 +702,8 @@ def create_vector_store():
     try:
         VECTOR_STORE_DIR.mkdir(exist_ok=True, parents=True)
         
-        d = 1024 if CURRENT_EMBED == BGE_M3 else 384
-        # Optimize HNSW index parameters for CPU
-        faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
-        faiss_index.hnsw.efConstruction = 64
-        faiss_index.hnsw.efSearch = 32
-        
-        vector_store = FaissVectorStore(faiss_index=faiss_index)
-        storage_context = StorageContext.from_defaults(vector_store=vector_store)
+        # Use default storage context (SimpleVectorStore)
+        storage_context = StorageContext.from_defaults()
         
         # Process all documents first
         print("Loading documents...")
@@ -722,12 +715,14 @@ def create_vector_store():
                 if file_path.stat().st_size == 0:
                     continue
                     
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                     text = f.read()
+                    
                 if not text.strip():
                     continue
                     
-                text = unicodedata.normalize('NFKD', text)
+                # Apply consistent normalization for all text content
+                text = unicodedata.normalize('NFKC', text)
                 all_documents.append(Document(text=text))
                 
                 if i % 100 == 0:  # Progress update every 100 files

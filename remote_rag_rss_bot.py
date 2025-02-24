@@ -305,7 +305,6 @@ def clean_category(category):
     if not category:
         return ""
     
-    # Handle array-like strings that sometimes come from RSS feeds
     if isinstance(category, str):
         # Remove any surrounding brackets and quotes
         category = category.strip('[]\'\"')
@@ -316,7 +315,7 @@ def clean_category(category):
         return ""
     
     # Remove all special characters except letters, numbers, spaces, and hyphens
-    cleaned = re.sub(r'[^\w\s-]', '', category)  # Removed comma from allowed chars
+    cleaned = re.sub(r'[^\w\s-]', '', category)
     
     # Normalize spaces and hyphens
     cleaned = re.sub(r'[-\s]+', ' ', cleaned).strip()
@@ -365,10 +364,9 @@ def clean_rss_boilerplate(content):
     
     # Handle common RSS boilerplate patterns
     patterns = [
-        # Original patterns
+        # Patterns
         r'The post.*?appeared first on.*?\.',
         r'<a href="https://communistusa\.org[^>]*>.*?</a>',
-        # New patterns
         r'org">Revolutionary Communists of America\.',
         r'org">[^<]*</a>',  # Catches any remaining org"> patterns
         r'\[ ?to read the full analysis[^\]]*\]',  # Catches "[to read...]" patterns

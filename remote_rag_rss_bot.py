@@ -264,18 +264,22 @@ def extract_metadata_from_entry(entry):
             else:
                 tag_text = str(tag)
 
-            # New: Handle comma-separated tags regardless of format
+            # Clean and split tags containing commas
+            cleaned_tags = []
             if ',' in tag_text:
                 # Split and clean individual categories
                 for raw_cat in tag_text.split(','):
                     cleaned = clean_category(raw_cat)
                     if cleaned:
-                        categories.add(cleaned)
+                        cleaned_tags.append(cleaned)
             else:
-                # Original processing for single tags
                 cleaned = clean_category(tag_text)
                 if cleaned:
-                    categories.add(cleaned)
+                    cleaned_tags.append(cleaned)
+            
+            # Add valid categories to the set
+            for valid_cat in cleaned_tags:
+                categories.add(valid_cat)
     
     # Process category field, handling both single and multiple categories
     if hasattr(entry, 'category'):
@@ -311,11 +315,15 @@ def clean_category(category):
     if not category:
         return ""
     
-    # Basic cleanup - remove special chars except spaces, hyphens, and commas
-    cleaned = re.sub(r'[^\w\s\-,]', '', category)
+    # Remove all special characters except letters, numbers, spaces, and hyphens
+    cleaned = re.sub(r'[^\w\s-]', '', category)  # Removed comma from allowed chars
     
     # Normalize spaces and hyphens
     cleaned = re.sub(r'[-\s]+', ' ', cleaned).strip()
+    
+    # Skip empty or single-character categories
+    if len(cleaned) <= 1:
+        return ""
     
     # Title case each word
     return cleaned.title()
@@ -608,11 +616,11 @@ def setup_rag_system():
     llm = initialize_llm()
     print("\nChat model initialized.")
     
-    # Setup embedding model
+    # Setup embedding model with optimized parameters
     embed_model = HuggingFaceEmbedding(
         model_name=CURRENT_EMBED,
-        max_length=256,
-        embed_batch_size=32
+        max_length=512,
+        embed_batch_size=64
     )
     print("Embedding model initialized.")
     
@@ -668,7 +676,7 @@ def setup_rag_system():
     )
 
 def create_vector_store():
-    """Create a new vector store"""
+    """Create a new vector store with CPU optimizations"""
     if not CACHE_DIR.exists() or not any(CACHE_DIR.iterdir()):
         print("\nError: No RSS archive found. Please run option 1 first.")
         return None
@@ -686,58 +694,67 @@ def create_vector_store():
     print("\nInitializing embedding model...")
     embed_model = HuggingFaceEmbedding(
         model_name=CURRENT_EMBED,
-        max_length=256,
-        embed_batch_size=32
+        max_length=512,
+        embed_batch_size=64
     )
+    
+    # Set the embedding model in Settings before creating the index
+    Settings.embed_model = embed_model
+    print("Embedding model initialized and set.")
     
     try:
         VECTOR_STORE_DIR.mkdir(exist_ok=True, parents=True)
         
         d = 1024 if CURRENT_EMBED == BGE_M3 else 384
-        faiss_index = faiss.IndexHNSWFlat(d, 32)
-        vector_store = FaissVectorStore(faiss_index=faiss_index)
+        # Optimize HNSW index parameters for CPU
+        faiss_index = faiss.IndexHNSWFlat(d, 32, faiss.METRIC_INNER_PRODUCT)
+        faiss_index.hnsw.efConstruction = 64
+        faiss_index.hnsw.efSearch = 32
         
+        vector_store = FaissVectorStore(faiss_index=faiss_index)
         storage_context = StorageContext.from_defaults(vector_store=vector_store)
         
-        # Load and validate documents
-        documents = []
-        for file_path in CACHE_DIR.glob("*.txt"):
+        # Process all documents first
+        print("Loading documents...")
+        all_documents = []
+        total_files = len(list(CACHE_DIR.glob("*.txt")))
+        
+        for i, file_path in enumerate(CACHE_DIR.glob("*.txt"), 1):
             try:
                 if file_path.stat().st_size == 0:
-                    print(f"Warning: Empty file found: {file_path}")
                     continue
                     
                 with open(file_path, "r", encoding="utf-8") as f:
                     text = f.read()
                 if not text.strip():
-                    print(f"Warning: File contains only whitespace: {file_path}")
                     continue
-                documents.append(Document(text=text))
-            except UnicodeDecodeError:
-                print(f"Warning: Encoding issue with file {file_path}")
-                try:
-                    with open(file_path, "r", encoding="latin-1") as f:
-                        text = f.read()
-                    documents.append(Document(text=text))
-                except Exception as doc_error:
-                    print(f"Error loading document {file_path}: {str(doc_error)}")
-                    continue
+                    
+                text = unicodedata.normalize('NFKD', text)
+                all_documents.append(Document(text=text))
+                
+                if i % 100 == 0:  # Progress update every 100 files
+                    print(f"Loaded {i}/{total_files} documents...")
+                    
+            except Exception as e:
+                print(f"Error processing {file_path}: {str(e)}")
+                continue
         
-        if not documents:
-            raise ValueError("No documents could be loaded from cache directory")
-            
-        valid_documents = [doc for doc in documents if len(doc.text.strip()) > 50]
-        if not valid_documents:
-            raise ValueError("No valid documents found (all documents too short)")
+        # Filter valid documents
+        valid_documents = [doc for doc in all_documents if len(doc.text.strip()) > 50]
+        print(f"\nProcessing {len(valid_documents)} valid documents...")
         
+        # Set service context with our embedding model
+        service_context = Settings
+        
+        # Create index from all valid documents at once
         index = VectorStoreIndex.from_documents(
             valid_documents,
             storage_context=storage_context,
             show_progress=True,
-            service_context=Settings
+            service_context=service_context
         )
         
-        print(f"Saving vector store at {VECTOR_STORE_DIR}")
+        print(f"\nSaving vector store at {VECTOR_STORE_DIR}")
         index.storage_context.persist(persist_dir=VECTOR_STORE_DIR)
         print("\nVector store created successfully!")
         

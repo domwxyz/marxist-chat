@@ -250,81 +250,75 @@ def extract_metadata_from_entry(entry):
     published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
     author = entry.get('author', 'Unknown Author')
     url = entry.get('link', 'No URL')
-
     formatted_date = format_date(published_date)
-    categories = []
-
-    # Process categories
-    if hasattr(entry, 'categories'):
-        # Normalize to list first
-        categories_raw = entry.categories
-        if not isinstance(categories_raw, list):
-            categories_raw = [categories_raw]
-        
-        for cat in categories_raw:
-            try:
-                # Handle category objects
-                if hasattr(cat, 'term'):
-                    category_text = cat.term
-                elif hasattr(cat, 'label'):
-                    category_text = cat.label
-                else:
-                    category_text = str(cat)
-
-                # Split comma-separated values
-                for sub_cat in category_text.split(','):
-                    sub_cat = sub_cat.strip()
-                    if sub_cat:
-                        cleaned = clean_category(sub_cat)
-                        if cleaned:
-                            categories.append(cleaned)
-            except Exception as e:
-                print(f"Error processing category: {e}")
-
-    # Process tags
+    
+    # Initialize categories set to avoid duplicates
+    categories = set()
+    
+    # Process tags field
     if hasattr(entry, 'tags'):
         for tag in entry.tags:
-            try:
-                # Extract tag text properly
-                tag_text = tag.get('term', str(tag))
+            # Handle dictionary-style tags
+            if isinstance(tag, dict):
+                tag_text = tag.get('term', '')
+            else:
+                tag_text = str(tag)
+
+            # New: Handle comma-separated tags regardless of format
+            if ',' in tag_text:
+                # Split and clean individual categories
+                for raw_cat in tag_text.split(','):
+                    cleaned = clean_category(raw_cat)
+                    if cleaned:
+                        categories.add(cleaned)
+            else:
+                # Original processing for single tags
                 cleaned = clean_category(tag_text)
                 if cleaned:
-                    categories.append(cleaned)
-            except Exception as e:
-                print(f"Error processing tag: {e}")
-
-    # Clean and deduplicate
-    seen = set()
-    unique_categories = []
-    for cat in categories:
-        lower_cat = cat.lower()
-        if lower_cat not in seen and len(cat) > 2:
-            seen.add(lower_cat)
-            unique_categories.append(cat)
-    unique_categories.sort()
-
+                    categories.add(cleaned)
+    
+    # Process category field, handling both single and multiple categories
+    if hasattr(entry, 'category'):
+        categories_list = entry.category if isinstance(entry.category, list) else [entry.category]
+        for cat in categories_list:
+            cleaned = clean_category(cat)
+            if cleaned:
+                categories.add(cleaned)
+    
+    # Convert set to sorted list
+    categories = sorted(categories)
+    
     return {
         "title": title,
         "date": formatted_date,
         "author": author,
         "url": url,
-        "categories": unique_categories
+        "categories": categories
     }
 
 def clean_category(category):
     """Clean and normalize a category string"""
-    try:
-        category = str(category).strip("'\"[](){}").strip()
-        if len(category) <= 1:
-            return ""
-        # Remove special characters, keep hyphens and spaces
-        category = re.sub(r'[^\w\s-]', '', category)
-        # Capitalize each word
-        category = ' '.join(word.capitalize() for word in category.split())
-        return category if len(category) > 2 else ""
-    except Exception as e:
-        print(f"Error cleaning category: {e}")
+    if not category:
         return ""
+    
+    # Handle array-like strings that sometimes come from RSS feeds
+    if isinstance(category, str):
+        # Remove any surrounding brackets and quotes
+        category = category.strip('[]\'\"')
+    
+    # Convert to string and clean
+    category = str(category).strip()
+    if not category:
+        return ""
+    
+    # Basic cleanup - remove special chars except spaces, hyphens, and commas
+    cleaned = re.sub(r'[^\w\s\-,]', '', category)
+    
+    # Normalize spaces and hyphens
+    cleaned = re.sub(r'[-\s]+', ' ', cleaned).strip()
+    
+    # Title case each word
+    return cleaned.title()
 
 def sanitize_filename(title):
     """Sanitize title for filesystem safety with Unicode support"""
@@ -471,7 +465,6 @@ def format_metadata(metadata):
     ]
     
     if metadata.get('categories'):
-        # Always include Categories line, even if empty
         categories_str = ', '.join(metadata['categories'])
         metadata_block.append(f"Categories: {categories_str}")
     
@@ -869,6 +862,12 @@ def format_response(response):
                 output.append(f"   Date: {date}")
                 output.append(f"   Author: {author}")
                 output.append(f"   URL: {url}")
+                
+                categories_str = metadata.get('Categories') or ''
+                categories_list = [cat.strip() for cat in categories_str.split(',') if cat.strip()]
+            
+                if categories_list:
+                    output.append(f"   Categories: {', '.join(categories_list)}")
                 
                 # Extract and clean the content for the excerpt
                 content_section = ""

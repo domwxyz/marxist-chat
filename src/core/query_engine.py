@@ -50,9 +50,9 @@ class QueryEngine:
             
             # Create a regular query engine with adjusted parameters
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=8,  # Increased from 5 to get more potential matches
+                similarity_top_k=4,
                 node_postprocessors=[
-                    SimilarityPostprocessor(similarity_cutoff=0.5)  # Reduced from 0.7
+                    SimilarityPostprocessor(similarity_cutoff=0.4)
                 ],
                 text_qa_template=query_template,
                 verbose=True  # This helps with debugging

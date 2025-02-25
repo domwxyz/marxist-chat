@@ -78,7 +78,7 @@ class LLMManager:
                 model_url=model_url,
                 model_path=None,
                 temperature=temperature,
-                max_new_tokens=1024,
+                max_new_tokens=256,
                 context_window=8192,
                 model_kwargs={"n_threads": threads},
                 verbose=False
@@ -104,7 +104,7 @@ class LLMManager:
             embed_model = HuggingFaceEmbedding(
                 model_name=model_name,
                 max_length=512,
-                embed_batch_size=64
+                embed_batch_size=32
             )
             
             logger.info("Embedding model initialization successful")

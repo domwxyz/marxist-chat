@@ -76,7 +76,7 @@ class VectorStoreManager:
             print("Loading documents...")
             all_documents = []
             total_files = len(list(self.cache_dir.glob("*.txt")))
-            
+
             for i, file_path in enumerate(self.cache_dir.glob("*.txt"), 1):
                 try:
                     if file_path.stat().st_size == 0:
@@ -87,12 +87,29 @@ class VectorStoreManager:
                         
                     if not text.strip():
                         continue
+                    
+                    # Extract metadata from text
+                    metadata = self._extract_metadata_from_text(text)
+                    
+                    # Restructure the text to emphasize metadata at the beginning
+                    # This helps the embedding model capture the relationship between
+                    # metadata and content without changing the actual content
+                    enhanced_text = f"Title: {metadata.get('title', 'Untitled')}\n"
+                    enhanced_text += f"Author: {metadata.get('author', 'Unknown')}\n"
+                    
+                    if 'categories' in metadata:
+                        enhanced_text += f"Categories: {metadata.get('categories', '')}\n"
+                        
+                    enhanced_text += f"Date: {metadata.get('date', 'Unknown')}\n\n"
+                    
+                    # Append the original text
+                    enhanced_text += text
                         
                     # Apply consistent normalization for all text content
-                    text = unicodedata.normalize('NFKC', text)
+                    enhanced_text = unicodedata.normalize('NFKC', enhanced_text)
                     
                     from llama_index.core import Document
-                    all_documents.append(Document(text=text))
+                    all_documents.append(Document(text=enhanced_text, metadata=metadata))
                     
                     if i % 100 == 0:
                         print(f"Loaded {i}/{total_files} documents...")
@@ -146,7 +163,7 @@ class VectorStoreManager:
             Settings.embed_model = embed_model
             Settings.node_parser = SentenceSplitter(
                 chunk_size=512,
-                chunk_overlap=25,
+                chunk_overlap=100,
                 paragraph_separator="\n\n"
             )
             

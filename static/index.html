@@ -546,6 +546,13 @@
                     sourceTitle.innerHTML = `<strong>${index + 1}. ${source.title}</strong>`;
                     sourceItem.appendChild(sourceTitle);
                     
+                    // Add author information
+                    if (source.author && source.author !== 'Unknown' && source.author !== 'Unknown Author') {
+                        const sourceAuthor = document.createElement('div');
+                        sourceAuthor.innerHTML = `<small>Author: ${source.author}</small>`;
+                        sourceItem.appendChild(sourceAuthor);
+                    }
+                    
                     const sourceDate = document.createElement('div');
                     sourceDate.innerHTML = `<small>Date: ${source.date}</small>`;
                     sourceItem.appendChild(sourceDate);

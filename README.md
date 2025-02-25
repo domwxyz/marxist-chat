@@ -16,7 +16,9 @@ The project has been restructured from a monolithic script into a modular applic
 ## Features
 
 - **Real-time Streaming**: Token-by-token streaming via WebSockets for a responsive chat experience
+- **Interruptible Queries**: Stop in-progress queries via WebSocket commands or REST API
 - **Concurrent User Support**: Handles multiple users with a queueing system for overflow
+- **Document Search**: Search and retrieve specific documents from the archive
 - **Source Attribution**: Responses include relevant source information with titles, dates, and URLs
 - **Metrics Collection**: System metrics for monitoring application health and performance
 - **Scalable Architecture**: Designed for horizontal scaling with Kubernetes
@@ -118,14 +120,14 @@ python src/main.py
 ```
 
 You will be presented with a menu interface with the following options:
-- 1. Archive RSS Feed - Downloads articles from the RSS feed
-- 2. Create Vector Store - Creates the vector database from archived articles
-- 3. Load Vector Store - Loads the existing vector database
-- 4. Load Chat - Starts the chat interface
-- 5. Delete RSS Archive - Removes the downloaded articles
-- 6. Delete Vector Store - Removes the vector database
-- 7. Configuration - Adjust program settings
-- 0. Exit - Quit the program
+1. Archive RSS Feed - Downloads articles from the RSS feed
+2. Create Vector Store - Creates the vector database from archived articles
+3. Load Vector Store - Loads the existing vector database
+4. Load Chat - Starts the chat interface
+5. Delete RSS Archive - Removes the downloaded articles
+6. Delete Vector Store - Removes the vector database
+7. Configuration - Adjust program settings
+0. Exit - Quit the program
 
 ### Web Server Mode
 
@@ -167,25 +169,52 @@ For production deployment with Kubernetes, refer to the [Kubernetes Deployment G
 
 ## API Endpoints
 
-### Main Endpoints
+### Health and Status
 
 - `GET /api/v1/healthcheck` - Check if the API is running
 - `GET /api/v1/status` - Get system status information
+
+### Queue Management
+
+- `GET /api/v1/queue` - Get detailed queue status
+- `POST /api/v1/queue/clear` - Admin endpoint to clear the waiting queue
+
+### Archive and Vector Store Management
+
 - `POST /api/v1/archive-rss` - Archive RSS feeds
 - `POST /api/v1/create-vector-store` - Create vector store from archived documents
 - `GET /api/v1/feed-stats` - Get feed statistics
 - `GET /api/v1/vector-store-stats` - Get vector store statistics
-- `POST /api/v1/query` - Process a query
+
+### Document Access
+
+- `GET /api/v1/documents/{document_id}` - Get a specific document by ID
+- `GET /api/v1/documents/search` - Search for documents matching a query
+
+### Model Information
+
+- `GET /api/v1/model-info` - Get information about the current LLM model
+
+### Query Management
+
+- `POST /api/v1/query` - Process a query and get response with sources
+- `POST /api/v1/query/{user_id}/stop` - Stop an in-progress query
+
+### Service Management
+
+- `POST /api/v1/service/restart` - Admin endpoint to restart service components
+
+### Metrics
+
+- `GET /api/v1/metrics` - Get detailed system metrics
+- `GET /api/v1/metrics/summary` - Get a simplified metrics summary
 
 ### WebSocket Endpoints
 
 - `WebSocket /api/v1/ws/chat/{user_id}` - WebSocket endpoint for chat interface
 - `WebSocket /api/v1/ws/chat` - WebSocket endpoint with auto-generated ID
 
-### Metrics Endpoints
-
-- `GET /api/v1/metrics` - Get detailed system metrics
-- `GET /api/v1/metrics/summary` - Get a simplified metrics summary
+For detailed API documentation, see [API.md](src/api/API.md).
 
 ## Configuration
 
@@ -232,6 +261,7 @@ The application includes a simple web interface for interacting with the chatbot
 
 - Real-time WebSocket connection to the chatbot
 - Token-by-token streaming for responsive chat experience
+- Ability to interrupt long-running queries
 - Buttons for archiving RSS feeds and creating the vector store
 - Status checking capabilities
 - Source attribution for responses
@@ -246,20 +276,62 @@ The application supports three scaling methods:
 
 ## WebSocket Message Format
 
-### Client to Server
+### Client to Server Messages
+
+**Query Message:**
 ```json
 {
   "message": "What is the communist position on healthcare?"
 }
 ```
 
-### Server to Client
+**Stop Query Command:**
+```json
+{
+  "command": "stop_query"
+}
+```
 
-**Response Messages:**
+### Server to Client Messages
+
+**System Messages:**
+```json
+{
+  "type": "system",
+  "message": "Connected to chat service"
+}
+```
+
+**Queue Messages:**
+```json
+{
+  "type": "queue",
+  "position": 3,
+  "message": "You are #3 in queue. Estimated wait time: ~6 minutes"
+}
+```
+
+**Status Messages:**
+```json
+{
+  "type": "status",
+  "message": "Processing your query..."
+}
+```
+
+**Stream Messages:**
 ```json
 {
   "type": "stream_token",
   "data": "token"
+}
+```
+
+**Query Stopped Messages:**
+```json
+{
+  "type": "query_stopped",
+  "message": "Query was stopped by user request."
 }
 ```
 
@@ -304,6 +376,7 @@ The web interface can be customized by modifying the `static/index.html` file. T
 - **No Responses to Questions**: Verify that both RSS archive and vector store have been created.
 - **Model Loading Errors**: Check disk space and ensure the model URL is accessible.
 - **Slow Response Times**: Check the NUM_THREADS setting and consider using a smaller model.
+- **Interrupted Queries Not Stopping**: Ensure WebSocket connection is stable and backend is responsive.
 
 ### Logs
 

@@ -1,8 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import logging
 import atexit
+from pathlib import Path
 
 from api.exceptions import setup_exception_handlers 
 from api.router import router
@@ -17,6 +19,10 @@ logger = setup_logging(
     log_level=config.LOG_LEVEL,
     json_format=False  # Set to True if you want JSON-formatted logs
 )
+
+# Set up static directory for frontend
+STATIC_DIR = Path(__file__).parent.parent / "static"
+STATIC_DIR.mkdir(exist_ok=True, parents=True)
 
 app = FastAPI(
     title="Marxist Chat API",
@@ -39,9 +45,18 @@ app.add_middleware(
 # Add metrics middleware
 app.add_middleware(MetricsMiddleware)
 
+# Mount static files directory
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 # Include routers
 app.include_router(router, prefix="/api/v1")
 app.include_router(metrics_router, prefix="/api/v1")
+
+# Root route to serve the SPA
+@app.get("/")
+async def serve_spa():
+    from fastapi.responses import FileResponse
+    return FileResponse(STATIC_DIR / "index.html")
 
 # Start metrics collector
 @app.on_event("startup")
@@ -67,3 +82,4 @@ if __name__ == "__main__":
         port=config.PORT,
         reload=config.DEBUG
     )
+    

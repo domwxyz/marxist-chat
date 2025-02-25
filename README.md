@@ -8,9 +8,19 @@ The project has been restructured from a monolithic script into a modular applic
 
 1. A command-line interface (CLI) for local usage
 2. A FastAPI web server for remote access
-3. WebSocket support for real-time chat interactions
+3. WebSocket support for real-time chat interactions with token-by-token streaming
 4. A queueing system for handling concurrent users
-5. Kubernetes deployment for scaling and high availability
+5. A simple web interface for interacting with the chatbot
+6. Kubernetes deployment for scaling and high availability
+
+## Features
+
+- **Real-time Streaming**: Token-by-token streaming via WebSockets for a responsive chat experience
+- **Concurrent User Support**: Handles multiple users with a queueing system for overflow
+- **Source Attribution**: Responses include relevant source information with titles, dates, and URLs
+- **Metrics Collection**: System metrics for monitoring application health and performance
+- **Scalable Architecture**: Designed for horizontal scaling with Kubernetes
+- **Simple Web Interface**: Built-in frontend for easy interaction
 
 ## Requirements
 
@@ -77,6 +87,8 @@ marxist-chat/
 │   ├── config.py       # Application configuration
 │   └── main.py         # CLI application entry point
 ├── kubernetes/         # Kubernetes deployment files
+├── static/             # Static files for the web interface
+│   └── index.html      # Frontend client HTML
 ├── posts_cache/        # Directory for cached RSS feed articles
 ├── vector_store/       # Directory for vector database storage
 ├── logs/               # Application logs
@@ -94,6 +106,7 @@ The application stores data in the following directories at the project root:
 - `posts_cache/` - Cached RSS feed articles
 - `vector_store/` - Vector database storage
 - `logs/` - Application logs
+- `static/` - Frontend web interface files
 
 ## Usage
 
@@ -122,6 +135,18 @@ python src/app.py
 ```
 
 This launches a FastAPI server on the configured host and port (default: http://0.0.0.0:8000).
+
+Once the server is running, you can access the web interface by navigating to http://localhost:8000 in your browser.
+
+### First-Time Setup with Web Interface
+
+When using the application for the first time through the web interface:
+
+1. Access the web interface at http://localhost:8000
+2. Click "Connect" to establish a WebSocket connection
+3. Click "Archive RSS Feed" to download articles
+4. Click "Create Vector Store" to build the vector database (this may take several minutes)
+5. Once the vector store is created, you can start asking questions in the chat interface
 
 ### Docker Deployment
 
@@ -172,6 +197,22 @@ Edit `.env` or modify `src/config.py` to customize:
 - System prompt for the LLM
 - Storage directories for cache and vector store
 
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| HOST | Server hostname | 0.0.0.0 |
+| PORT | Server port | 8000 |
+| DEBUG | Enable debug mode | False |
+| MAX_CONCURRENT_USERS | Maximum concurrent users | 30 |
+| QUEUE_TIMEOUT | Queue timeout in seconds | 300 |
+| REQUEST_TIMEOUT | Request timeout in seconds | 120 |
+| CURRENT_LLM | URL to LLM model | Qwen2.5-3B-Instruct GGUF |
+| CURRENT_EMBED | Embedding model name | BAAI/bge-m3 |
+| NUM_THREADS | Number of threads for LLM inference | 4 |
+| TEMPERATURE | Temperature for LLM responses | 0.2 |
+| LOG_LEVEL | Logging level | INFO |
+
 ## Models
 
 The application supports multiple models:
@@ -185,13 +226,15 @@ The application supports multiple models:
 - BGE-M3 (Default)
 - GTE-Small
 
-## Features
+## Web Interface
 
-- **Real-time Streaming**: Token-by-token streaming via WebSockets for a responsive chat experience
-- **Concurrent User Support**: Handles multiple users with a queueing system for overflow
-- **Source Attribution**: Responses include relevant source information with titles, dates, and URLs
-- **Metrics Collection**: System metrics for monitoring application health and performance
-- **Scalable Architecture**: Designed for horizontal scaling with Kubernetes
+The application includes a simple web interface for interacting with the chatbot. The interface provides:
+
+- Real-time WebSocket connection to the chatbot
+- Token-by-token streaming for responsive chat experience
+- Buttons for archiving RSS feeds and creating the vector store
+- Status checking capabilities
+- Source attribution for responses
 
 ## Scalability
 
@@ -201,6 +244,50 @@ The application supports three scaling methods:
 2. **Docker Compose**: Useful for development and single-machine deployment
 3. **Kubernetes**: For production deployment with horizontal scaling
 
+## WebSocket Message Format
+
+### Client to Server
+```json
+{
+  "message": "What is the communist position on healthcare?"
+}
+```
+
+### Server to Client
+
+**Response Messages:**
+```json
+{
+  "type": "stream_token",
+  "data": "token"
+}
+```
+
+**Source Messages:**
+```json
+{
+  "type": "sources",
+  "data": [
+    {
+      "title": "Healthcare as a Human Right",
+      "date": "2023-02-15",
+      "url": "https://communistusa.org/2023/02/healthcare-human-right",
+      "excerpt": "Access to healthcare is a fundamental human right that should not be commodified..."
+    }
+  ]
+}
+```
+
+## Customization
+
+### System Prompt
+
+You can customize the system prompt by modifying the `SYSTEM_PROMPT` variable in your `.env` file or `src/config.py`. The system prompt sets the behavior and personality of the chatbot.
+
+### Web Interface
+
+The web interface can be customized by modifying the `static/index.html` file. This includes styles, layout, and functionality.
+
 ## Contributing
 
 1. Fork the repository
@@ -208,6 +295,28 @@ The application supports three scaling methods:
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+## Troubleshooting
+
+### Common Issues
+
+- **WebSocket Connection Failed**: Ensure your server is running and check for firewall issues.
+- **No Responses to Questions**: Verify that both RSS archive and vector store have been created.
+- **Model Loading Errors**: Check disk space and ensure the model URL is accessible.
+- **Slow Response Times**: Check the NUM_THREADS setting and consider using a smaller model.
+
+### Logs
+
+Check the log files in the `logs/` directory for detailed error information.
+
+## Performance Considerations
+
+- The application is resource-intensive, particularly during vector store creation and query processing.
+- For production deployments, consider server specifications with at least:
+  - 4+ CPU cores
+  - 8GB+ RAM
+  - SSD storage for faster vector operations
+  - Adequate bandwidth for model downloads
 
 ## License
 

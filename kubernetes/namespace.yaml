@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: marxist-chat
+  labels:
+    name: marxist-chat
+    

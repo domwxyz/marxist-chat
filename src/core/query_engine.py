@@ -1,50 +1,76 @@
+import asyncio
+from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
+import logging
+import traceback
+
 from llama_index.core import PromptTemplate
 from llama_index.core.postprocessor import SimilarityPostprocessor
-from typing import List, Dict, Any
 
 import config
 from core.vector_store import VectorStoreManager
 from core.llm_manager import LLMManager
 
+logger = logging.getLogger("core.query_engine")
+
 class QueryEngine:
     def __init__(self, vector_store_dir=None):
         self.vector_store_manager = VectorStoreManager(vector_store_dir)
         self.query_engine = None
+        self.streaming_engine = None
         self.index = None
         self.last_sources = []
     
-    def initialize(self):
+    def initialize(self) -> bool:
         """Initialize the query engine with the vector store"""
-        self.index = self.vector_store_manager.load_vector_store()
-        if not self.index:
+        try:
+            # Load vector store
+            self.index = self.vector_store_manager.load_vector_store()
+            if not self.index:
+                logger.error("Failed to load vector store")
+                return False
+            
+            # Create query template - using template that works with Qwen models
+            query_template = PromptTemplate(
+                "<|im_start|>system\n" + config.SYSTEM_PROMPT + "<|im_end|>\n"
+                "<|im_start|>user\n"
+                "Context information is below.\n"
+                "---------------------\n"
+                "{context_str}\n"
+                "---------------------\n"
+                "Given this context, please answer the question: {query_str}\n"
+                "<|im_end|>\n"
+                "<|im_start|>assistant\n"
+            )
+            
+            # Create regular query engine (non-streaming for collecting sources)
+            self.query_engine = self.index.as_query_engine(
+                similarity_top_k=5,
+                node_postprocessors=[
+                    SimilarityPostprocessor(similarity_cutoff=0.7)
+                ],
+                text_qa_template=query_template,
+                streaming=False
+            )
+            
+            # Create streaming query engine for streaming responses
+            self.streaming_engine = self.index.as_query_engine(
+                similarity_top_k=5,
+                node_postprocessors=[
+                    SimilarityPostprocessor(similarity_cutoff=0.7)
+                ],
+                text_qa_template=query_template,
+                streaming=True
+            )
+            
+            logger.info("Query engine initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error initializing query engine: {e}")
+            logger.error(traceback.format_exc())
             return False
-        
-        # Create query template
-        query_template = PromptTemplate(
-            "<|im_start|>system\n" + config.SYSTEM_PROMPT + "<|im_end|>\n"
-            "<|im_start|>user\n"
-            "Context information is below.\n"
-            "---------------------\n"
-            "{context_str}\n"
-            "---------------------\n"
-            "Given this context, please answer the question: {query_str}\n"
-            "<|im_end|>\n"
-            "<|im_start|>assistant\n"
-        )
-        
-        # Create query engine
-        self.query_engine = self.index.as_query_engine(
-            similarity_top_k=5,
-            node_postprocessors=[
-                SimilarityPostprocessor(similarity_cutoff=0.7)
-            ],
-            text_qa_template=query_template,
-            streaming=True  # Enable streaming for future WebSocket use
-        )
-        
-        return True
     
-    def query(self, query_text):
+    def query(self, query_text: str):
         """Process a query and return the response"""
         if not self.query_engine:
             raise ValueError("Query engine not initialized. Call initialize() first.")
@@ -53,13 +79,68 @@ class QueryEngine:
         self.last_sources = []
         
         # Get response
-        response = self.query_engine.query(query_text)
-        
-        # Store sources for later retrieval
-        if hasattr(response, 'source_nodes'):
-            self.last_sources = response.source_nodes
+        try:
+            logger.info(f"Processing query: {query_text[:100]}...")
+            response = self.query_engine.query(query_text)
             
-        return response
+            # Store sources for later retrieval
+            if hasattr(response, 'source_nodes'):
+                self.last_sources = response.source_nodes
+                
+            return response
+        except Exception as e:
+            logger.error(f"Error processing query: {e}")
+            logger.error(traceback.format_exc())
+            raise
+    
+    async def stream_query(self, query_text: str) -> AsyncGenerator[str, None]:
+        """Process a query and stream the response tokens asynchronously"""
+        if not self.streaming_engine:
+            raise ValueError("Streaming engine not initialized. Call initialize() first.")
+        
+        # Reset sources for the new query
+        self.last_sources = []
+        
+        try:
+            # First, get sources synchronously to ensure we have them
+            # We need to do this as a separate step since the streaming response may not 
+            # provide source nodes correctly in all cases
+            logger.info(f"Fetching sources for query: {query_text[:100]}...")
+            non_streaming_response = self.query_engine.query(query_text)
+            
+            if hasattr(non_streaming_response, 'source_nodes'):
+                self.last_sources = non_streaming_response.source_nodes
+                logger.info(f"Found {len(self.last_sources)} source nodes for query")
+            
+            # Now, get streaming response
+            logger.info(f"Processing streaming query: {query_text[:100]}...")
+            response = self.streaming_engine.query(query_text)
+            
+            # Stream the response tokens
+            buffer = ""
+            chunk_size = 1  # Send in very small chunks for smooth streaming
+            
+            for text in response.response_gen:
+                buffer += text
+                
+                while len(buffer) >= chunk_size:
+                    chunk = buffer[:chunk_size]
+                    buffer = buffer[chunk_size:]
+                    yield chunk
+                    
+                    # Small sleep to prevent overwhelming the client
+                    # This helps with smoother streaming experience
+                    await asyncio.sleep(0.01)
+            
+            # Send any remaining text in the buffer
+            if buffer:
+                yield buffer
+                
+        except Exception as e:
+            error_msg = f"Error processing streaming query: {str(e)}"
+            logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            yield f"Error: {str(e)}"
     
     def format_response(self, response):
         """Format response with sources in a clean way"""
@@ -138,13 +219,13 @@ class QueryEngine:
                         break
                         
                 except Exception as e:
-                    print(f"Error formatting source {idx}: {str(e)}")
+                    logger.error(f"Error formatting source {idx}: {str(e)}")
                     continue
         
         return "\n".join(output)
     
-    def get_formatted_sources(self):
-        """Return formatted sources from the last query"""
+    def get_formatted_sources(self, max_sources=5):
+        """Return formatted sources from the last query in a format suitable for API responses"""
         formatted_sources = []
         seen_urls = set()
         
@@ -172,6 +253,7 @@ class QueryEngine:
                 title = metadata.get('Title') or node.metadata.get('title', 'Untitled')
                 date = metadata.get('Date') or node.metadata.get('date', 'Unknown')
                 url = metadata.get('URL') or node.metadata.get('url', 'No URL')
+                author = metadata.get('Author') or node.metadata.get('author', 'Unknown')
                 
                 # Skip duplicate URLs
                 if url in seen_urls:
@@ -199,16 +281,18 @@ class QueryEngine:
                 formatted_sources.append({
                     "title": title,
                     "date": date,
+                    "author": author,
                     "url": url,
                     "excerpt": excerpt
                 })
                 
-                # Limit to 5 sources
-                if len(formatted_sources) >= 5:
+                # Limit to max_sources sources
+                if len(formatted_sources) >= max_sources:
                     break
                     
             except Exception as e:
-                print(f"Error formatting source: {e}")
+                logger.error(f"Error formatting source: {e}")
                 continue
                 
         return formatted_sources
+        

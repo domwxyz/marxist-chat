@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: marxist-chat-config
+data:
+  # LLM Configuration
+  CURRENT_LLM: "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+  CURRENT_EMBED: "BAAI/bge-m3"
+  
+  # RSS Feed URLs - comma separated
+  RSS_FEED_URLS: "https://communistusa.org/feed"
+  
+  # System prompt
+  SYSTEM_PROMPT: |-
+    You are an AI assistant that answers questions in a friendly manner, based on the given source documents. Here are some rules you always follow:
+    - Generate human readable output, avoid creating output with gibberish text.
+    - Generate only the requested output, don't include any other language before or after the requested output.
+    - Never say thank you, that you are happy to help, that you are an AI agent, etc. Just answer directly.
+    - Generate professional language typically used in business documents in North America.
+    - Never generate offensive or foul language.
+    

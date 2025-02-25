@@ -2,18 +2,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import logging
+import atexit
 
+from api.exceptions import setup_exception_handlers 
 from api.router import router
+from api.middleware import MetricsMiddleware, metrics_collector
+from api.metrics_endpoint import metrics_router, start_metrics_collector
+from utils.logging_setup import setup_logging
 import config
 
 # Configure logging
-logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
-    format=config.LOG_FORMAT,
-    handlers=[
-        logging.FileHandler(config.LOG_FILE),
-        logging.StreamHandler()
-    ]
+logger = setup_logging(
+    log_dir=config.LOG_DIR,
+    log_level=config.LOG_LEVEL,
+    json_format=False  # Set to True if you want JSON-formatted logs
 )
 
 app = FastAPI(
@@ -21,6 +23,9 @@ app = FastAPI(
     description="API for RAG-based chat interface for communist articles",
     version="1.0.0"
 )
+
+# Set up global exception handlers
+setup_exception_handlers(app)
 
 # Configure CORS
 app.add_middleware(
@@ -31,8 +36,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include router
+# Add metrics middleware
+app.add_middleware(MetricsMiddleware)
+
+# Include routers
 app.include_router(router, prefix="/api/v1")
+app.include_router(metrics_router, prefix="/api/v1")
+
+# Start metrics collector
+@app.on_event("startup")
+def startup_event():
+    """Initialize services on startup"""
+    logger.info("Starting API server")
+    start_metrics_collector()
+
+# Stop metrics collector on shutdown
+@app.on_event("shutdown")
+def shutdown_event():
+    """Cleanup on shutdown"""
+    logger.info("Shutting down API server")
+    metrics_collector.stop()
+
+# Register shutdown handler
+atexit.register(metrics_collector.stop)
 
 if __name__ == "__main__":
     uvicorn.run(

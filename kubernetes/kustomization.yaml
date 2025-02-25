@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - persistent-volumes.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+  - horizontal-pod-autoscaler.yaml
+
+namespace: marxist-chat
+
+# Optional: you can customize your image here
+# images:
+# - name: marxist-chat
+#   newName: your-registry/marxist-chat
+#   newTag: latest
+
+# Optional: add common labels to all resources
+commonLabels:
+  app.kubernetes.io/name: marxist-chat
+  app.kubernetes.io/instance: marxist-chat
+  app.kubernetes.io/part-of: marxist-chat-app
+  

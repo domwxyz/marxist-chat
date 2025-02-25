@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: marxist-chat
+  labels:
+    app: marxist-chat
+spec:
+  selector:
+    app: marxist-chat
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  type: ClusterIP  # Use ClusterIP for internal service, will be exposed via Ingress
+  

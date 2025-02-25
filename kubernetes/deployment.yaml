@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: marxist-chat
+  labels:
+    app: marxist-chat
+spec:
+  replicas: 1  # Start with a single replica
+  selector:
+    matchLabels:
+      app: marxist-chat
+  template:
+    metadata:
+      labels:
+        app: marxist-chat
+    spec:
+      containers:
+      - name: marxist-chat
+        image: marxist-chat:latest
+        imagePullPolicy: IfNotPresent
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "4Gi"
+            cpu: "2"
+        ports:
+        - containerPort: 8000
+        env:
+        - name: DEBUG
+          value: "False"
+        - name: HOST
+          value: "0.0.0.0"
+        - name: PORT
+          value: "8000"
+        - name: MAX_CONCURRENT_USERS
+          value: "30"
+        - name: QUEUE_TIMEOUT
+          value: "300"
+        - name: REQUEST_TIMEOUT
+          value: "120"
+        - name: NUM_THREADS
+          value: "4"
+        - name: TEMPERATURE
+          value: "0.2"
+        - name: LOG_LEVEL
+          value: "INFO"
+        volumeMounts:
+        - name: posts-cache
+          mountPath: /app/posts_cache
+        - name: vector-store
+          mountPath: /app/vector_store
+        - name: logs
+          mountPath: /app/logs
+        livenessProbe:
+          httpGet:
+            path: /api/v1/healthcheck
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /api/v1/healthcheck
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+      volumes:
+      - name: posts-cache
+        persistentVolumeClaim:
+          claimName: posts-cache-pvc
+      - name: vector-store
+        persistentVolumeClaim:
+          claimName: vector-store-pvc
+      - name: logs
+        persistentVolumeClaim:
+          claimName: logs-pvc

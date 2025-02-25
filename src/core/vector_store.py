@@ -2,6 +2,8 @@ import shutil
 from pathlib import Path
 from llama_index.core import Settings, VectorStoreIndex, load_index_from_storage, StorageContext
 from llama_index.core.node_parser import SentenceSplitter
+from llama_index.vector_stores.chroma import ChromaVectorStore
+import chromadb
 import unicodedata
 
 from core.llm_manager import LLMManager
@@ -11,22 +13,29 @@ class VectorStoreManager:
     def __init__(self, vector_store_dir=None, cache_dir=None):
         self.vector_store_dir = vector_store_dir or config.VECTOR_STORE_DIR
         self.cache_dir = cache_dir or config.CACHE_DIR
+        self.chroma_client = None
+        self.chroma_collection = None
+    
+    def _init_chroma_client(self):
+        """Initialize ChromaDB client and collection"""
+        # Ensure vector store directory exists
+        self.vector_store_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize ChromaDB client with persistence path
+        self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
+        
+        # Create or get collection named "articles"
+        self.chroma_collection = self.chroma_client.get_or_create_collection("articles")
+        
+        return self.chroma_collection
     
     def create_vector_store(self, overwrite=False):
         """Create a new vector store from cached documents"""
-        # Check if cache directory exists and has content
-        cache_dir_has_content = False
-        if self.cache_dir.exists():
-            cache_dir_has_content = any(self.cache_dir.glob("*.txt"))
-            
-        if not cache_dir_has_content:
-            print("\nError: No RSS archive found or archive is empty. Please archive RSS feed first.")
+        if not self.cache_dir.exists() or not any(self.cache_dir.iterdir()):
+            print("\nError: No RSS archive found. Please archive RSS feed first.")
             return None
-        
-        # Check if vector store exists and has content
-        vector_store_exists = self.vector_store_dir.exists() and any(self.vector_store_dir.iterdir())
             
-        if vector_store_exists:
+        if self.vector_store_dir.exists():
             if not overwrite:
                 print("\nVector store already exists. Set overwrite=True to recreate it.")
                 return None
@@ -42,7 +51,7 @@ class VectorStoreManager:
         # Set the embedding model in Settings before creating the index
         Settings.embed_model = embed_model
         
-        # Set the node parser
+        # Set the node parser for chunking documents
         Settings.node_parser = SentenceSplitter(
             chunk_size=512,
             chunk_overlap=25,
@@ -52,10 +61,14 @@ class VectorStoreManager:
         print("Embedding model initialized and settings configured.")
         
         try:
-            self.vector_store_dir.mkdir(exist_ok=True, parents=True)
+            # Initialize ChromaDB
+            chroma_collection = self._init_chroma_client()
             
-            # Use default storage context
-            storage_context = StorageContext.from_defaults()
+            # Create a vector store using ChromaDB
+            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+            
+            # Create storage context with ChromaDB vector store
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
             
             # Process all documents
             print("Loading documents...")
@@ -88,11 +101,6 @@ class VectorStoreManager:
             
             # Filter valid documents
             valid_documents = [doc for doc in all_documents if len(doc.text.strip()) > 50]
-            
-            if not valid_documents:
-                print("\nError: No valid documents found in the RSS archive.")
-                return None
-                
             print(f"\nProcessing {len(valid_documents)} valid documents...")
             
             # Create index from documents
@@ -103,10 +111,7 @@ class VectorStoreManager:
                 service_context=Settings
             )
             
-            print(f"\nSaving vector store at {self.vector_store_dir}")
-            index.storage_context.persist(persist_dir=self.vector_store_dir)
-            print("\nVector store created successfully!")
-            
+            print(f"\nVector store created successfully at {self.vector_store_dir}")
             return index
             
         except Exception as e:
@@ -138,8 +143,12 @@ class VectorStoreManager:
                 paragraph_separator="\n\n"
             )
             
-            # Load storage context
-            storage_context = StorageContext.from_defaults(persist_dir=self.vector_store_dir)
+            # Initialize ChromaDB
+            chroma_collection = self._init_chroma_client()
+            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+            
+            # Load storage context with existing ChromaDB vector store
+            storage_context = StorageContext.from_defaults(vector_store=vector_store)
             
             # Load index
             index = load_index_from_storage(

@@ -81,8 +81,7 @@ class LLMManager:
                 max_new_tokens=1024,
                 context_window=8192,
                 model_kwargs={"n_threads": threads},
-                verbose=False,
-                streaming=True
+                verbose=False
             )
             
             logger.info("LLM initialization successful")

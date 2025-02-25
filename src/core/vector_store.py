@@ -125,6 +125,8 @@ class VectorStoreManager:
     
     def load_vector_store(self):
         """Load the existing vector store"""
+        print(f"Attempting to load vector store from: {self.vector_store_dir}")
+        
         if not self.vector_store_dir.exists():
             print(f"\nError: No vector store found at {self.vector_store_dir}")
             return None
@@ -143,24 +145,37 @@ class VectorStoreManager:
                 paragraph_separator="\n\n"
             )
             
-            # Initialize ChromaDB
-            chroma_collection = self._init_chroma_client()
+            # Initialize ChromaDB client
+            print("Initializing ChromaDB client...")
+            chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
+            collection_name = "articles"
+            
+            # Check if the collection exists
+            collection_names = chroma_client.list_collections()
+            print(f"Found collections: {collection_names}")
+            
+            if collection_name not in collection_names:
+                print(f"No collection named '{collection_name}' found in ChromaDB")
+                return None
+                
+            # Get the collection
+            chroma_collection = chroma_client.get_collection(collection_name)
+            
+            # Create vector store with the ChromaDB collection
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
             
-            # Load storage context with existing ChromaDB vector store
-            storage_context = StorageContext.from_defaults(vector_store=vector_store)
-            
-            # Load index
-            index = load_index_from_storage(
-                storage_context=storage_context,
-                service_context=Settings
-            )
+            # Create a new index with the existing vector store
+            print("Creating index from the ChromaDB vector store...")
+            from llama_index.core import VectorStoreIndex
+            index = VectorStoreIndex.from_vector_store(vector_store)
             
             print("Vector store loaded successfully!")
             return index
             
         except Exception as e:
             print(f"\nError loading vector store: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def get_document_by_id(self, document_id: str):
@@ -253,3 +268,29 @@ class VectorStoreManager:
     def _vector_store_loaded(self):
         """Check if vector store is loaded"""
         return self.chroma_client is not None and self.chroma_collection is not None
+        
+    def test_search(self, query="communism"):
+        """Test searching in the vector store"""
+        try:
+            if not self.chroma_collection:
+                self._init_chroma_client()
+            
+            # Get embedding model
+            from core.llm_manager import LLMManager
+            embed_model = LLMManager.initialize_embedding_model()
+            
+            # Search directly in the collection
+            print(f"DEBUG: Testing direct search for '{query}'")
+            query_embedding = embed_model.get_text_embedding(query)
+            results = self.chroma_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=5
+            )
+            
+            print(f"DEBUG: Search results: {results}")
+            return results
+        except Exception as e:
+            print(f"ERROR: Search test failed: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return None

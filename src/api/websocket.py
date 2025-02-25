@@ -191,7 +191,6 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     # Stream the response token by token
                     full_response = ""
                     
-                    # We need to set a timeout for the entire streaming process
                     try:
                         # Create a task for the streaming query
                         stream_task = asyncio.create_task(

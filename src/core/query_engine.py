@@ -3,8 +3,10 @@ from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 import logging
 import traceback
 
-from llama_index.core import PromptTemplate
+from llama_index.core import PromptTemplate, Settings
 from llama_index.core.postprocessor import SimilarityPostprocessor
+from llama_index.core.query_engine import RetrieverQueryEngine
+from llama_index.core.retrievers import VectorIndexRetriever
 
 import config
 from core.vector_store import VectorStoreManager
@@ -42,29 +44,19 @@ class QueryEngine:
                 "<|im_start|>assistant\n"
             )
             
-            # Create regular query engine (non-streaming for collecting sources)
+            # Create a regular query engine with adjusted parameters
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=5,
+                similarity_top_k=8,  # Increased from 5 to get more potential matches
                 node_postprocessors=[
-                    SimilarityPostprocessor(similarity_cutoff=0.7)
+                    SimilarityPostprocessor(similarity_cutoff=0.5)  # Reduced from 0.7
                 ],
                 text_qa_template=query_template,
-                streaming=False
-            )
-            
-            # Create streaming query engine for streaming responses
-            self.streaming_engine = self.index.as_query_engine(
-                similarity_top_k=5,
-                node_postprocessors=[
-                    SimilarityPostprocessor(similarity_cutoff=0.7)
-                ],
-                text_qa_template=query_template,
-                streaming=True
+                verbose=True  # This helps with debugging
             )
             
             logger.info("Query engine initialized successfully")
             return True
-            
+                
         except Exception as e:
             logger.error(f"Error initializing query engine: {e}")
             logger.error(traceback.format_exc())
@@ -81,7 +73,20 @@ class QueryEngine:
         # Get response
         try:
             logger.info(f"Processing query: {query_text[:100]}...")
+            
             response = self.query_engine.query(query_text)
+            
+            # Check if response is empty
+            if str(response.response).strip() == "Empty Response":
+                print("DEBUG: Empty response from RAG, using direct LLM fallback")
+                
+                # Use direct LLM query as fallback
+                from llama_index.core import Settings
+                direct_prompt = f"Based on your knowledge, please answer the following question: {query_text}"
+                direct_response = Settings.llm.complete(direct_prompt)
+                
+                # Replace the empty response with the direct LLM response
+                response.response = direct_response
             
             # Store sources for later retrieval
             if hasattr(response, 'source_nodes'):
@@ -91,6 +96,7 @@ class QueryEngine:
         except Exception as e:
             logger.error(f"Error processing query: {e}")
             logger.error(traceback.format_exc())
+            print(f"ERROR: {str(e)}")
             raise
     
     async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None) -> AsyncGenerator[str, None]:
@@ -103,8 +109,6 @@ class QueryEngine:
         
         try:
             # First, get sources synchronously to ensure we have them
-            # We need to do this as a separate step since the streaming response may not 
-            # provide source nodes correctly in all cases
             logger.info(f"Fetching sources for query: {query_text[:100]}...")
             non_streaming_response = self.query_engine.query(query_text)
             
@@ -112,40 +116,27 @@ class QueryEngine:
                 self.last_sources = non_streaming_response.source_nodes
                 logger.info(f"Found {len(self.last_sources)} source nodes for query")
             
-            # Now, get streaming response
+            # Get streaming response
             logger.info(f"Processing streaming query: {query_text[:100]}...")
-            response = self.streaming_engine.query(query_text)
+            streaming_response = self.streaming_engine.query(query_text)
             
             # Stream the response tokens
-            buffer = ""
-            chunk_size = 4  # Send in very small chunks for smooth streaming
-            
-            for text in response.response_gen:
+            for text in streaming_response.response_gen:
                 # Check for stop event if provided
                 if stop_event and stop_event.is_set():
                     logger.info("Query streaming stopped by stop event")
                     return
                     
-                buffer += text
+                yield text
                 
-                while len(buffer) >= chunk_size:
-                    chunk = buffer[:chunk_size]
-                    buffer = buffer[chunk_size:]
-                    yield chunk
-                    
-                    # Check for stop again after yielding
-                    if stop_event and stop_event.is_set():
-                        logger.info("Query streaming stopped by stop event after chunk")
-                        return
-                    
-                    # Small sleep to prevent overwhelming the client
-                    # This helps with smoother streaming experience
-                    await asyncio.sleep(0.01)
-            
-            # Send any remaining text in the buffer
-            if buffer:
-                yield buffer
+                # Small sleep to prevent overwhelming the client
+                await asyncio.sleep(0.01)
                 
+                # Check for stop again after yielding
+                if stop_event and stop_event.is_set():
+                    logger.info("Query streaming stopped by stop event after chunk")
+                    return
+                    
         except Exception as e:
             error_msg = f"Error processing streaming query: {str(e)}"
             logger.error(error_msg)
@@ -159,8 +150,9 @@ class QueryEngine:
         if response.source_nodes:
             output.append("\nSources:")
             seen_sources = set()  # Track unique sources
+            source_counter = 1  # Explicit counter for sources
             
-            for idx, node in enumerate(response.source_nodes, 1):
+            for node in response.source_nodes:
                 try:
                     # Extract metadata from the actual content
                     content_lines = node.text.split('\n')
@@ -194,7 +186,7 @@ class QueryEngine:
                     seen_sources.add(source_id)
                     
                     # Format source information
-                    output.append(f"\n{idx}. {title}")
+                    output.append(f"\n{source_counter}. {title}")
                     output.append(f"   Date: {date}")
                     output.append(f"   Author: {author}")
                     output.append(f"   URL: {url}")
@@ -219,21 +211,34 @@ class QueryEngine:
                     # Use content section for excerpt, fallback to raw text if needed
                     excerpt = content_section if content_section else node.text
                     excerpt = excerpt.strip()
+                    
+                    # Clean HTML entities in the excerpt
+                    import html
+                    excerpt = html.unescape(excerpt)
+                    
+                    # Limit excerpt length and ensure it doesn't end with an incomplete word
                     if len(excerpt) > 200:
-                        excerpt = excerpt[:200] + "..."
+                        # Find the last space before 200 chars
+                        last_space = excerpt[:200].rfind(' ')
+                        if last_space > 150:  # Only truncate if we can get a reasonable chunk
+                            excerpt = excerpt[:last_space] + "..."
+                        else:
+                            excerpt = excerpt[:200] + "..."
                     
                     output.append(f"   Relevant excerpt: {excerpt}\n")
                     
+                    # Increment source counter
+                    source_counter += 1
+                    
                     # Limit to 5 unique sources
-                    if len(seen_sources) >= 5:
+                    if source_counter > 5:
                         break
                         
                 except Exception as e:
-                    logger.error(f"Error formatting source {idx}: {str(e)}")
+                    logger.error(f"Error formatting source: {str(e)}")
                     continue
-        
+            
         return "\n".join(output)
-    
     def get_formatted_sources(self, max_sources=5):
         """Return formatted sources from the last query in a format suitable for API responses"""
         formatted_sources = []
@@ -305,4 +310,19 @@ class QueryEngine:
                 continue
                 
         return formatted_sources
+        
+    def test_llm(self):
+        """Test if the LLM is functioning properly"""
+        try:
+            from llama_index.core import Settings
+            test_prompt = "Generate a short response about communism in 1-2 sentences."
+            print(f"DEBUG: Sending test prompt directly to LLM: {test_prompt}")
+            response = Settings.llm.complete(test_prompt)
+            print(f"DEBUG: Direct LLM response: {response}")
+            return f"LLM Test Result: {response}"
+        except Exception as e:
+            print(f"ERROR: LLM test failed: {e}")
+            import traceback
+            print(traceback.format_exc())
+            return f"LLM Test Error: {str(e)}"
         

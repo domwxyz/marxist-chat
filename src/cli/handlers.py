@@ -80,6 +80,7 @@ class MenuHandlers:
                 response = query_engine.query(query)
                 formatted_output = query_engine.format_response(response)
                 print(formatted_output)
+                # Remove any code here that might be printing "Question:" again
             except Exception as e:
                 print(f"\nError: {e}")
     
@@ -237,3 +238,14 @@ class MenuHandlers:
                     print("Invalid feed number.")
             else:
                 print("Cannot remove the last RSS feed.")
+
+    @staticmethod
+    def handle_test_llm(query_engine):
+        """Test if the LLM is functioning properly"""
+        if not query_engine:
+            print("\nError: No query engine loaded. Please run option 3 first.")
+            return
+        
+        print("\nTesting LLM functionality...")
+        result = query_engine.test_llm()
+        print(result)

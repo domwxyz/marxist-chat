@@ -118,7 +118,7 @@ class QueryEngine:
             
             # Stream the response tokens
             buffer = ""
-            chunk_size = 1  # Send in very small chunks for smooth streaming
+            chunk_size = 4  # Send in very small chunks for smooth streaming
             
             for text in response.response_gen:
                 buffer += text

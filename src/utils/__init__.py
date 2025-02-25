@@ -2,6 +2,7 @@ from .text_utils import ensure_unicode, preprocess_content, clean_rss_boilerplat
 from .metadata_utils import clean_category, sanitize_filename, format_date, format_metadata
 from .file_utils import (
     ensure_directory,
+    directory_has_content,
     delete_directory,
     get_file_count,
     get_file_size,

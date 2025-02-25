@@ -7,7 +7,7 @@ import atexit
 from api.exceptions import setup_exception_handlers 
 from api.router import router
 from api.middleware import MetricsMiddleware, metrics_collector
-from api.metrics_endpoint import metrics_router, start_metrics_collector
+from api.metrics_endpoints import metrics_router, start_metrics_collector
 from utils.logging_setup import setup_logging
 import config
 

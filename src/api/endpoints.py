@@ -261,3 +261,26 @@ async def stop_user_query(user_id: str) -> Dict[str, str]:
     except Exception as e:
         logger.error(f"Error stopping query: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+async def rebuild_metadata_index():
+    """Rebuild the metadata index from cached documents"""
+    try:
+        from core.metadata_repository import MetadataRepository
+        import config
+        
+        metadata_repo = MetadataRepository(config.CACHE_DIR)
+        success = metadata_repo.build_metadata_index(force_rebuild=True)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": f"Metadata index rebuilt successfully with {len(metadata_repo.metadata_list)} entries"
+            }
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Failed to rebuild metadata index"
+            )
+    except Exception as e:
+        logger.error(f"Error rebuilding metadata index: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

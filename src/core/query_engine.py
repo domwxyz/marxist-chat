@@ -11,6 +11,7 @@ from llama_index.core.retrievers import VectorIndexRetriever
 import config
 from core.vector_store import VectorStoreManager
 from core.llm_manager import LLMManager
+from core.metadata_repository import MetadataRepository
 
 logger = logging.getLogger("core.query_engine")
 
@@ -21,6 +22,7 @@ class QueryEngine:
         self.streaming_engine = None
         self.index = None
         self.last_sources = []
+        self.metadata_repository = MetadataRepository(self.vector_store_manager.cache_dir)
     
     def initialize(self) -> bool:
         """Initialize the query engine with the vector store"""
@@ -30,6 +32,8 @@ class QueryEngine:
             if not self.index:
                 logger.error("Failed to load vector store")
                 return False
+                
+            self.metadata_repository.load_metadata_index()
             
             # Create query template - using template that works with Qwen models
             query_template = PromptTemplate(
@@ -76,23 +80,33 @@ class QueryEngine:
             
             response = self.query_engine.query(query_text)
             
-            # Check if response is empty
-            if str(response.response).strip() == "Empty Response":
-                print("DEBUG: Empty response from RAG, using direct LLM fallback")
-                
-                # Use direct LLM query as fallback
-                from llama_index.core import Settings
-                direct_prompt = f"Based on your knowledge, please answer the following question: {query_text}"
-                direct_response = Settings.llm.complete(direct_prompt)
-                
-                # Replace the empty response with the direct LLM response
-                response.response = direct_response
-            
             # Store sources for later retrieval
             if hasattr(response, 'source_nodes'):
                 self.last_sources = response.source_nodes
+            
+            # Check if response is empty or no sources were found
+            if (str(response.response).strip() == "Empty Response" or 
+                (hasattr(response, 'source_nodes') and len(response.source_nodes) == 0)):
+                print("DEBUG: Empty response from RAG, using metadata fallback")
+                
+                # Get metadata context
+                metadata_context = self.metadata_repository.get_formatted_context()
+                
+                # Use direct LLM query with metadata context as fallback
+                from llama_index.core import Settings
+                fallback_prompt = (
+                    f"Based on the following document index, please provide information about: {query_text}\n\n"
+                    f"{metadata_context}\n\n"
+                    f"If you don't have relevant information in the document index, please state that clearly."
+                )
+                
+                direct_response = Settings.llm.complete(fallback_prompt)
+                
+                # Replace the empty response with the direct LLM response
+                response.response = direct_response
                 
             return response
+            
         except Exception as e:
             logger.error(f"Error processing query: {e}")
             logger.error(traceback.format_exc())

@@ -7,6 +7,7 @@ import chromadb
 import unicodedata
 
 from core.llm_manager import LLMManager
+from core.metadata_repository import MetadataRepository
 import config
 
 class VectorStoreManager:
@@ -15,6 +16,7 @@ class VectorStoreManager:
         self.cache_dir = cache_dir or config.CACHE_DIR
         self.chroma_client = None
         self.chroma_collection = None
+        self.metadata_repository = MetadataRepository(self.cache_dir)
     
     def _init_chroma_client(self):
         """Initialize ChromaDB client and collection"""
@@ -110,6 +112,9 @@ class VectorStoreManager:
                 show_progress=True,
                 service_context=Settings
             )
+            
+            print("Building metadata index...")
+            self.metadata_repository.build_metadata_index(force_rebuild=True)
             
             print(f"\nVector store created successfully at {self.vector_store_dir}")
             return index

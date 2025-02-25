@@ -113,6 +113,21 @@ class MenuHandlers:
                 print("\nVector store deleted successfully!")
             except Exception as e:
                 print(f"\nError deleting vector store: {e}")
+                
+    @staticmethod
+    def handle_rebuild_metadata_index():
+        """Rebuild the metadata index"""
+        from core.metadata_repository import MetadataRepository
+        import config
+        
+        metadata_repo = MetadataRepository(config.CACHE_DIR)
+        print("\nRebuilding metadata index...")
+        success = metadata_repo.build_metadata_index(force_rebuild=True)
+        
+        if success:
+            print(f"\nMetadata index rebuilt successfully with {len(metadata_repo.metadata_list)} entries")
+        else:
+            print("\nFailed to rebuild metadata index")
     
     @staticmethod
     def handle_configuration():

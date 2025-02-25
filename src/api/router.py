@@ -128,3 +128,8 @@ async def api_stop_query(user_id: str):
             status_code=404, 
             detail=f"No active query found for user {user_id}"
         )
+
+@router.post("/rebuild-metadata-index")
+async def api_rebuild_metadata_index():
+    """Rebuild metadata index from cached documents"""
+    return await rebuild_metadata_index()

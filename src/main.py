@@ -20,7 +20,7 @@ def main():
     while True:
         try:
             Menu.display_main_menu()
-            choice = Menu.get_choice(8)  # Update this from 7 to 8
+            choice = Menu.get_choice(9)
             
             if choice == 0:
                 Menu.exit_program()
@@ -49,6 +49,9 @@ def main():
                 
             elif choice == 8:
                 MenuHandlers.handle_test_llm(query_engine)
+                
+            elif choice == 9:
+                MenuHandlers.handle_rebuild_metadata_index()
                 
         except KeyboardInterrupt:
             print("\nOperation cancelled.")

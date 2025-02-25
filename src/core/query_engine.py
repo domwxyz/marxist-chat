@@ -93,8 +93,8 @@ class QueryEngine:
             logger.error(traceback.format_exc())
             raise
     
-    async def stream_query(self, query_text: str) -> AsyncGenerator[str, None]:
-        """Process a query and stream the response tokens asynchronously"""
+    async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None) -> AsyncGenerator[str, None]:
+        """Process a query and stream the response tokens asynchronously with stop capability"""
         if not self.streaming_engine:
             raise ValueError("Streaming engine not initialized. Call initialize() first.")
         
@@ -121,12 +121,22 @@ class QueryEngine:
             chunk_size = 4  # Send in very small chunks for smooth streaming
             
             for text in response.response_gen:
+                # Check for stop event if provided
+                if stop_event and stop_event.is_set():
+                    logger.info("Query streaming stopped by stop event")
+                    return
+                    
                 buffer += text
                 
                 while len(buffer) >= chunk_size:
                     chunk = buffer[:chunk_size]
                     buffer = buffer[chunk_size:]
                     yield chunk
+                    
+                    # Check for stop again after yielding
+                    if stop_event and stop_event.is_set():
+                        logger.info("Query streaming stopped by stop event after chunk")
+                        return
                     
                     # Small sleep to prevent overwhelming the client
                     # This helps with smoother streaming experience

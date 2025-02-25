@@ -133,3 +133,131 @@ async def get_vector_store_stats() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting vector store stats: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+async def get_queue_status() -> Dict[str, Any]:
+    """Get detailed information about the current queue status"""
+    from api.websocket import get_queue_status as ws_queue_status
+    
+    queue_info = ws_queue_status()
+    return {
+        "status": "success",
+        "queue_length": queue_info["queue_length"],
+        "active_connections": queue_info["active_connections"],
+        "max_concurrent_users": queue_info["max_concurrent_users"],
+        "estimated_wait_time": queue_info.get("estimated_wait_time", 0)
+    }
+
+async def clear_queue() -> Dict[str, Any]:
+    """Admin endpoint to clear the waiting queue"""
+    from api.websocket import clear_waiting_queue
+    
+    cleared_count = await clear_waiting_queue()
+    return {
+        "status": "success",
+        "message": f"Cleared {cleared_count} connections from the waiting queue"
+    }
+
+async def get_document_by_id(document_id: str) -> Dict[str, Any]:
+    """Get a specific document by ID"""
+    # This requires implementing a document ID system in your vector store
+    try:
+        from core.vector_store import VectorStoreManager
+        
+        vector_store = VectorStoreManager()
+        document = vector_store.get_document_by_id(document_id)
+        
+        if not document:
+            raise HTTPException(status_code=404, detail=f"Document with ID {document_id} not found")
+            
+        return {
+            "status": "success",
+            "document": {
+                "id": document_id,
+                "title": document.metadata.get("title", "Untitled"),
+                "date": document.metadata.get("date", "Unknown"),
+                "author": document.metadata.get("author", "Unknown"),
+                "url": document.metadata.get("url", ""),
+                "text": document.text[:1000] + "..." if len(document.text) > 1000 else document.text
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def search_documents(query: str, limit: int = 10) -> Dict[str, Any]:
+    """Search for documents matching a text query"""
+    try:
+        from core.vector_store import VectorStoreManager
+        
+        vector_store = VectorStoreManager()
+        results = vector_store.search_documents(query, limit=limit)
+        
+        documents = []
+        for doc, score in results:
+            documents.append({
+                "id": doc.metadata.get("file_name", "").replace(".txt", ""),
+                "title": doc.metadata.get("title", "Untitled"),
+                "date": doc.metadata.get("date", "Unknown"),
+                "url": doc.metadata.get("url", ""),
+                "relevance_score": float(score),
+                "excerpt": doc.text[:200] + "..." if len(doc.text) > 200 else doc.text
+            })
+            
+        return {
+            "status": "success",
+            "results": documents,
+            "count": len(documents),
+            "query": query
+        }
+    except Exception as e:
+        logger.error(f"Error searching documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def get_model_info() -> Dict[str, Any]:
+    """Get information about the current LLM model"""
+    try:
+        from core.llm_manager import LLMManager
+        
+        model_info = LLMManager.get_model_info()
+        return {
+            "status": "success",
+            "model": model_info
+        }
+    except Exception as e:
+        logger.error(f"Error getting model info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def restart_service() -> Dict[str, str]:
+    """Admin endpoint to restart the service components"""
+    try:
+        # Reset the query engine
+        from api.websocket import reset_query_engine
+        await reset_query_engine()
+        
+        return {
+            "status": "success",
+            "message": "Service components restarted successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error restarting service: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+async def stop_user_query(user_id: str) -> Dict[str, str]:
+    """Stop an in-progress query for a user"""
+    try:
+        from api.websocket import stop_query
+        success = await stop_query(user_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"No active query found for user {user_id}"
+            )
+            
+        return {
+            "status": "success",
+            "message": f"Query stopped for user {user_id}"
+        }
+    except Exception as e:
+        logger.error(f"Error stopping query: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

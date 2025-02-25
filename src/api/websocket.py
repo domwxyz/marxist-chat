@@ -16,6 +16,9 @@ active_connections: Dict[str, WebSocket] = {}
 waiting_queue: List[Tuple[str, WebSocket, float]] = []  # (user_id, websocket, timestamp)
 _query_engine: Optional[QueryEngine] = None
 
+active_queries: Dict[str, asyncio.Task] = {}  # Track active query tasks by user_id
+query_stop_events: Dict[str, asyncio.Event] = {}  # Events to signal query cancellation
+
 # Keep track of connections being processed to prevent race conditions
 processing_connections: Set[str] = set()
 
@@ -145,6 +148,18 @@ async def handle_chat(websocket: WebSocket, user_id: str):
             
             # Get the message text
             query_text = message_data.get("message", "").strip()
+            command = message_data.get("command", "")
+
+            # Handle stop query command
+            if command == "stop_query":
+                await stop_query(user_id)
+                await websocket.send_json({
+                    "type": "system",
+                    "message": "Query has been stopped."
+                })
+                continue
+
+            # Continue with normal query processing if not a command
             if not query_text:
                 await websocket.send_json({
                     "type": "error",
@@ -169,15 +184,34 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                         "type": "stream_start"
                     })
                     
+                    # Create a stop event for this query
+                    stop_event = asyncio.Event()
+                    query_stop_events[user_id] = stop_event
+                    
                     # Stream the response token by token
                     full_response = ""
                     
                     # We need to set a timeout for the entire streaming process
                     try:
+                        # Create a task for the streaming query
+                        stream_task = asyncio.create_task(
+                            query_engine.stream_query(query_text, stop_event)
+                        )
+                        active_queries[user_id] = stream_task
+                        
                         async for token in asyncio.wait_for(
-                            query_engine.stream_query(query_text),
+                            stream_task,
                             timeout=config.REQUEST_TIMEOUT
                         ):
+                            # Check if the query was stopped
+                            if stop_event.is_set():
+                                # Send a message indicating the query was stopped
+                                await websocket.send_json({
+                                    "type": "query_stopped",
+                                    "message": "Query was stopped by user request."
+                                })
+                                break
+                            
                             full_response += token
                             await websocket.send_json({
                                 "type": "stream_token",
@@ -190,24 +224,44 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                             "type": "error",
                             "message": "Query processing timed out. Please try a simpler query."
                         })
+                        # Clean up resources
+                        if user_id in active_queries:
+                            del active_queries[user_id]
+                        if user_id in query_stop_events:
+                            del query_stop_events[user_id]
+                        continue
+                    except asyncio.CancelledError:
+                        logger.info(f"Query cancelled for user {user_id}")
+                        await websocket.send_json({
+                            "type": "query_stopped",
+                            "message": "Query was cancelled."
+                        })
                         continue
                     
                     # End timing
                     elapsed_time = time.time() - start_time
                     logger.info(f"Query processed in {elapsed_time:.2f}s for user {user_id}")
                     
-                    # Send "stream_end" message to notify frontend that streaming has completed
-                    await websocket.send_json({
-                        "type": "stream_end",
-                        "data": full_response
-                    })
+                    # Only send stream_end if we didn't stop early
+                    if not stop_event.is_set():
+                        # Send "stream_end" message to notify frontend that streaming has completed
+                        await websocket.send_json({
+                            "type": "stream_end",
+                            "data": full_response
+                        })
+                        
+                        # Send sources if available
+                        sources = query_engine.get_formatted_sources()
+                        await websocket.send_json({
+                            "type": "sources",
+                            "data": sources
+                        })
                     
-                    # Send sources if available
-                    sources = query_engine.get_formatted_sources()
-                    await websocket.send_json({
-                        "type": "sources",
-                        "data": sources
-                    })
+                    # Clean up resources
+                    if user_id in active_queries:
+                        del active_queries[user_id]
+                    if user_id in query_stop_events:
+                        del query_stop_events[user_id]
                     
                 except Exception as e:
                     logger.error(f"Error processing query for user {user_id}: {e}")
@@ -435,3 +489,93 @@ def get_connection_status():
         "queue_length": len(waiting_queue),
         "max_concurrent_users": config.MAX_CONCURRENT_USERS
     }
+    
+async def reset_query_engine():
+    """Reset the query engine to reload models and vector store"""
+    global _query_engine
+    _query_engine = None
+    logger.info("Query engine reset - will be reinitialized on next request")
+    return True
+
+async def clear_waiting_queue():
+    """Clear the waiting queue and notify users"""
+    count = len(waiting_queue)
+    
+    # Notify users being removed from queue
+    for user_id, websocket, _ in waiting_queue:
+        try:
+            await websocket.send_json({
+                "type": "system",
+                "message": "You have been removed from the queue due to an administrative action."
+            })
+        except Exception:
+            # Ignore errors for disconnected sockets
+            pass
+    
+    # Clear the queue
+    waiting_queue.clear()
+    logger.info(f"Cleared {count} connections from waiting queue")
+    return count
+
+def get_queue_status():
+    """Get detailed queue status information"""
+    # Get basic connection stats
+    stats = get_connection_status()
+    
+    # Calculate estimated wait times
+    queue_length = stats["queue_length"]
+    estimated_wait_time = 0
+    
+    if queue_length > 0:
+        # Assuming each user takes about 2 minutes on average
+        estimated_wait_time = queue_length * 2 * 60  # in seconds
+    
+    stats["estimated_wait_time"] = estimated_wait_time
+    
+    # Add queue position information
+    queue_positions = []
+    current_time = time.time()
+    
+    for idx, (user_id, _, timestamp) in enumerate(waiting_queue):
+        wait_time = current_time - timestamp
+        estimated_remaining = estimated_wait_time - wait_time if wait_time < estimated_wait_time else 0
+        
+        queue_positions.append({
+            "position": idx + 1,
+            "user_id": user_id,
+            "wait_time": int(wait_time),
+            "estimated_remaining": int(estimated_remaining)
+        })
+    
+    stats["queue_details"] = queue_positions
+    return stats
+
+async def stop_query(user_id: str) -> bool:
+    """Stop an in-progress query for a user"""
+    if user_id not in query_stop_events:
+        logger.warning(f"No active query found for user {user_id}")
+        return False
+    
+    # Set the stop event to signal cancellation
+    query_stop_events[user_id].set()
+    
+    # Try to cancel the task if it exists
+    if user_id in active_queries and not active_queries[user_id].done():
+        # Give a short grace period for natural cancellation
+        try:
+            await asyncio.wait_for(active_queries[user_id], timeout=1.0)
+        except asyncio.TimeoutError:
+            # Force cancel if it doesn't stop naturally
+            active_queries[user_id].cancel()
+        except Exception:
+            # Ignore other exceptions
+            pass
+    
+    # Clean up
+    if user_id in active_queries:
+        del active_queries[user_id]
+    if user_id in query_stop_events:
+        del query_stop_events[user_id]
+    
+    logger.info(f"Query stopped for user {user_id}")
+    return True

@@ -162,3 +162,94 @@ class VectorStoreManager:
         except Exception as e:
             print(f"\nError loading vector store: {e}")
             return None
+
+    def get_document_by_id(self, document_id: str):
+        """Retrieve a document by ID (filename)"""
+        # In our implementation, document_id would be the filename
+        file_path = self.cache_dir / f"{document_id}.txt"
+        
+        if not file_path.exists():
+            return None
+            
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+                
+            # Extract metadata from text
+            metadata = self._extract_metadata_from_text(text)
+            metadata["file_name"] = f"{document_id}.txt"
+            
+            from llama_index.core import Document
+            return Document(text=text, metadata=metadata)
+        except Exception as e:
+            print(f"Error loading document {document_id}: {str(e)}")
+            return None
+
+    def search_documents(self, query: str, limit: int = 10):
+        """Search for documents similar to the query text"""
+        # Initialize vector store if needed
+        if not self._vector_store_loaded():
+            self.load_vector_store()
+            
+        if not self.chroma_collection:
+            self._init_chroma_client()
+            
+        try:
+            # Import embedding model for query embedding
+            from core.llm_manager import LLMManager
+            embed_model = LLMManager.initialize_embedding_model()
+            
+            # Get query embedding
+            query_embedding = embed_model.get_text_embedding(query)
+            
+            # Query ChromaDB
+            results = self.chroma_collection.query(
+                query_embeddings=[query_embedding],
+                n_results=limit,
+                include=["documents", "metadatas", "distances"]
+            )
+            
+            # Format results
+            documents_with_scores = []
+            
+            if results and "documents" in results and results["documents"]:
+                for i, doc_text in enumerate(results["documents"][0]):
+                    metadata = results["metadatas"][0][i] if "metadatas" in results else {}
+                    distance = results["distances"][0][i] if "distances" in results else 1.0
+                    
+                    # Convert distance to similarity score (1 - distance) and normalize
+                    score = 1.0 - min(1.0, distance)
+                    
+                    # Create document object
+                    from llama_index.core import Document
+                    doc = Document(text=doc_text, metadata=metadata)
+                    documents_with_scores.append((doc, score))
+                    
+            return documents_with_scores
+        except Exception as e:
+            print(f"Error searching documents: {str(e)}")
+            return []
+
+    def _extract_metadata_from_text(self, text: str):
+        """Extract metadata section from document text"""
+        metadata = {}
+        lines = text.split("\n")
+        
+        in_metadata = False
+        for line in lines:
+            if line.strip() == "---":
+                if not in_metadata:
+                    in_metadata = True
+                    continue
+                else:
+                    break
+                    
+            if in_metadata and ": " in line:
+                key, value = line.split(": ", 1)
+                metadata[key] = value
+                
+        return metadata
+
+    def _vector_store_loaded(self):
+        """Check if vector store is loaded"""
+        return self.chroma_client is not None and self.chroma_collection is not None

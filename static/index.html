@@ -113,6 +113,22 @@
             background-color: #cccccc;
             cursor: not-allowed;
         }
+        
+        #stop-btn {
+            padding: 12px 24px;
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-left: 10px;
+            transition: background-color 0.3s;
+        }
+
+        #stop-btn:hover {
+            background-color: #d32f2f;
+        }
 
         .system-message {
             background-color: #f0f0f0;
@@ -308,6 +324,7 @@
                 <div class="chat-input">
                     <input type="text" id="message-input" placeholder="Type your question here..." disabled>
                     <button id="send-btn" disabled>Send</button>
+                    <button id="stop-btn" class="hidden">Stop</button>
                 </div>
             </div>
         </div>
@@ -319,6 +336,7 @@
             const connectBtn = document.getElementById('connect-btn');
             const disconnectBtn = document.getElementById('disconnect-btn');
             const sendBtn = document.getElementById('send-btn');
+            const stopBtn = document.getElementById('stop-btn');
             const messageInput = document.getElementById('message-input');
             const chatMessages = document.getElementById('chat-messages');
             const statusIndicator = document.getElementById('status-indicator');
@@ -348,6 +366,11 @@
             // Send message
             sendBtn.addEventListener('click', function() {
                 sendMessage();
+            });
+            
+            // Stop message
+            stopBtn.addEventListener('click', function() {
+                stopQuery();
             });
 
             // Press Enter to send message
@@ -418,6 +441,7 @@
             function disconnect() {
                 if (socket) {
                     socket.close();
+                    stopBtn.classList.add('hidden');
                 }
             }
 
@@ -438,6 +462,17 @@
                     
                     // Show typing indicator
                     showTypingIndicator();
+                }
+            }
+            
+            function stopQuery() {
+                if (socket && socket.readyState === WebSocket.OPEN && isStreaming) {
+                    socket.send(JSON.stringify({
+                        command: "stop_query"
+                    }));
+                    addSystemMessage("Query stopped by user");
+                    hideTypingIndicator();
+                    stopBtn.classList.add('hidden');
                 }
             }
 
@@ -461,6 +496,7 @@
                         isStreaming = true;
                         streamingMessage = '';
                         currentStreamElement = addBotMessage('');
+                        stopBtn.classList.remove('hidden');
                         break;
                     
                     case 'stream_token':
@@ -475,6 +511,14 @@
                     case 'stream_end':
                         isStreaming = false;
                         hideTypingIndicator();
+                        stopBtn.classList.add('hidden');
+                        break;
+                        
+                    case 'query_stopped':
+                        isStreaming = false;
+                        hideTypingIndicator();
+                        stopBtn.classList.add('hidden');
+                        addSystemMessage(data.message || "Query was stopped");
                         break;
                     
                     case 'sources':
@@ -487,6 +531,7 @@
                     case 'error':
                         addSystemMessage(`Error: ${data.message}`);
                         hideTypingIndicator();
+                        stopBtn.classList.add('hidden');
                         break;
                     
                     default:

@@ -44,6 +44,7 @@ class QueryEngine:
                 "{context_str}\n"
                 "---------------------\n"
                 "Given this context, please answer the question: {query_str}\n"
+                "Include guidance on which documents would be most helpful for the user to read for more information.\n"
                 "<|im_end|>\n"
                 "<|im_start|>assistant\n"
             )

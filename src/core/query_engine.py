@@ -25,7 +25,7 @@ class QueryEngine:
         self.metadata_repository = MetadataRepository(self.vector_store_manager.cache_dir)
     
     def initialize(self) -> bool:
-        """Initialize the query engine with the vector store"""
+        """Initialize the query engine with the vector store and streaming only"""
         try:
             # Load vector store
             self.index = self.vector_store_manager.load_vector_store()
@@ -49,17 +49,18 @@ class QueryEngine:
                 "<|im_start|>assistant\n"
             )
             
-            # Create a regular query engine with adjusted parameters
+            # Create a streaming query engine only
             self.query_engine = self.index.as_query_engine(
                 similarity_top_k=4,
                 node_postprocessors=[
                     SimilarityPostprocessor(similarity_cutoff=0.4)
                 ],
                 text_qa_template=query_template,
-                verbose=True  # This helps with debugging
+                verbose=True,
+                streaming=True  # Always streaming
             )
             
-            logger.info("Query engine initialized successfully")
+            logger.info("Streaming query engine initialized successfully")
             return True
                 
         except Exception as e:
@@ -68,7 +69,7 @@ class QueryEngine:
             return False
     
     def query(self, query_text: str):
-        """Process a query and return the response"""
+        """Process a query with streaming and return the collected response"""
         if not self.query_engine:
             raise ValueError("Query engine not initialized. Call initialize() first.")
         
@@ -79,16 +80,28 @@ class QueryEngine:
         try:
             logger.info(f"Processing query: {query_text[:100]}...")
             
-            response = self.query_engine.query(query_text)
+            # Use streaming query engine
+            streaming_response = self.query_engine.query(query_text)
+            
+            # Collect all tokens from the streaming response to create a complete response
+            response_text = ""
+            for text in streaming_response.response_gen:
+                response_text += text
+                # Print the token for CLI feedback
+                print(text, end="", flush=True)
             
             # Store sources for later retrieval
-            if hasattr(response, 'source_nodes'):
-                self.last_sources = response.source_nodes
+            if hasattr(streaming_response, 'source_nodes'):
+                self.last_sources = streaming_response.source_nodes
+            elif hasattr(streaming_response, '_source_nodes'):
+                # Some versions of llama-index store source nodes in a private attribute
+                self.last_sources = streaming_response._source_nodes
+            else:
+                logger.warning("No source nodes found in streaming response")
             
             # Check if response is empty or no sources were found
-            if (str(response.response).strip() == "Empty Response" or 
-                (hasattr(response, 'source_nodes') and len(response.source_nodes) == 0)):
-                print("DEBUG: Empty response from RAG, using metadata fallback")
+            if (not response_text.strip() or len(self.last_sources) == 0):
+                print("\nDEBUG: Empty response from RAG, using metadata fallback")
                 
                 # Get metadata context
                 metadata_context = self.metadata_repository.get_formatted_context()
@@ -102,11 +115,15 @@ class QueryEngine:
                 )
                 
                 direct_response = Settings.llm.complete(fallback_prompt)
-                
-                # Replace the empty response with the direct LLM response
-                response.response = direct_response
-                
-            return response
+                response_text = direct_response.text if hasattr(direct_response, 'text') else str(direct_response)
+            
+            # Create a response-like object that has the .response attribute for compatibility
+            from types import SimpleNamespace
+            response_obj = SimpleNamespace()
+            response_obj.response = response_text
+            response_obj.source_nodes = self.last_sources
+            
+            return response_obj
             
         except Exception as e:
             logger.error(f"Error processing query: {e}")
@@ -116,24 +133,22 @@ class QueryEngine:
     
     async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None) -> AsyncGenerator[str, None]:
         """Process a query and stream the response tokens asynchronously with stop capability"""
-        if not self.streaming_engine:
-            raise ValueError("Streaming engine not initialized. Call initialize() first.")
+        if not self.query_engine:
+            raise ValueError("Query engine not initialized. Call initialize() first.")
         
         # Reset sources for the new query
         self.last_sources = []
         
         try:
-            # First, get sources synchronously to ensure we have them
-            logger.info(f"Fetching sources for query: {query_text[:100]}...")
-            non_streaming_response = self.query_engine.query(query_text)
-            
-            if hasattr(non_streaming_response, 'source_nodes'):
-                self.last_sources = non_streaming_response.source_nodes
-                logger.info(f"Found {len(self.last_sources)} source nodes for query")
-            
-            # Get streaming response
+            # Get streaming response directly
             logger.info(f"Processing streaming query: {query_text[:100]}...")
-            streaming_response = self.streaming_engine.query(query_text)
+            streaming_response = self.query_engine.query(query_text)
+            
+            # Store source nodes before streaming begins if available
+            if hasattr(streaming_response, 'source_nodes'):
+                self.last_sources = streaming_response.source_nodes
+            elif hasattr(streaming_response, '_source_nodes'):
+                self.last_sources = streaming_response._source_nodes
             
             # Stream the response tokens
             for text in streaming_response.response_gen:
@@ -363,6 +378,74 @@ class QueryEngine:
                 continue
                 
         return formatted_sources
+        
+    def format_sources_only(self, source_nodes):
+        """Format only the sources in a clean way"""
+        output = ["\nSources:"]
+        seen_sources = set()  # Track unique sources
+        source_counter = 1  # Explicit counter for sources
+        
+        for node in source_nodes:
+            try:
+                # Extract metadata from the actual content
+                content_lines = node.text.split('\n')
+                metadata = {}
+                
+                # Parse metadata section
+                in_metadata = False
+                for line in content_lines:
+                    if line.strip() == '---':
+                        if not in_metadata:
+                            in_metadata = True
+                            continue
+                        else:
+                            break
+                    if in_metadata:
+                        if ': ' in line:
+                            key, value = line.split(': ', 1)
+                            metadata[key] = value
+                
+                # Use extracted metadata or fallback to node.metadata
+                title = metadata.get('Title') or node.metadata.get('title', 'Untitled')
+                date = metadata.get('Date') or node.metadata.get('date', 'Unknown')
+                url = metadata.get('URL') or node.metadata.get('url', 'No URL')
+                author = metadata.get('Author') or node.metadata.get('author', 'Unknown')
+                
+                source_id = f"{title}:{date}:{url}"
+                
+                # Skip duplicate sources
+                if source_id in seen_sources:
+                    continue
+                seen_sources.add(source_id)
+                
+                # Format source information
+                output.append(f"\n{source_counter}. {title}")
+                output.append(f"   Date: {date}")
+                output.append(f"   Author: {author}")
+                output.append(f"   URL: {url}")
+                
+                categories_str = metadata.get('Categories') or ''
+                categories_list = [cat.strip() for cat in categories_str.split(',') if cat.strip()]
+            
+                if categories_list:
+                    output.append(f"   Categories: {', '.join(categories_list)}")
+                
+                # Extract and clean the content for the excerpt
+                excerpt = self._extract_excerpt_from_node(node)
+                output.append(f"   Relevant excerpt: {excerpt}\n")
+                
+                # Increment source counter
+                source_counter += 1
+                
+                # Limit to 5 unique sources
+                if source_counter > 5:
+                    break
+                    
+            except Exception as e:
+                logger.error(f"Error formatting source: {str(e)}")
+                continue
+        
+        return "\n".join(output)
 
     def _extract_excerpt_from_node(self, node):
         """Helper method to extract a clean excerpt from a node"""

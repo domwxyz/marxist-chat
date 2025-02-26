@@ -188,42 +188,52 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     stop_event = asyncio.Event()
                     query_stop_events[user_id] = stop_event
                     
-                    # Process the non-streaming query first to get sources
-                    logger.info(f"Processing query: {query_text[:100]}...")
-                    response = query_engine.query(query_text)
-                    
-                    # Store sources for later retrieval
-                    if hasattr(response, 'source_nodes'):
-                        query_engine.last_sources = response.source_nodes
-                    
-                    # Stream the response token by token (simulate streaming by breaking up the response)
-                    full_response = str(response.response)
+                    # Process the query
+                    logger.info(f"Processing query with streaming: {query_text[:100]}...")
                     
                     try:
-                        # Create a task for simulated streaming
-                        async def simulate_streaming():
-                            # Split the response into words to simulate token-by-token streaming
+                        # Get the response - this gets the full response and source nodes
+                        response = query_engine.query(query_text)
+                        
+                        # Store the full response text
+                        full_response = str(response.response)
+                        
+                        # Store sources for later retrieval
+                        if hasattr(response, 'source_nodes'):
+                            query_engine.last_sources = response.source_nodes
+                        
+                        # Create a streaming generator that splits the response into tokens
+                        async def stream_response_tokens():
+                            # Split the response into tokens (simple word-by-word approach)
                             tokens = []
                             for paragraph in full_response.split('\n'):
                                 for word in paragraph.split(' '):
-                                    tokens.append(word + ' ')
-                                tokens.append('\n')
+                                    if word:  # Skip empty words
+                                        tokens.append(word + ' ')
+                                if paragraph:  # Only add newline for non-empty paragraphs
+                                    tokens.append('\n')
                             
+                            # Stream the tokens
                             for token in tokens:
                                 # Check if the query was stopped
                                 if stop_event.is_set():
                                     return
                                 
                                 yield token
+                                
                                 # Add a small delay to simulate streaming
                                 await asyncio.sleep(0.02)
-                                
+                        
+                        # Create a streaming task
                         stream_task = asyncio.create_task(
-                            anext(simulate_streaming().__aiter__())
+                            anext(stream_response_tokens().__aiter__())
                         )
                         active_queries[user_id] = stream_task
                         
-                        async for token in simulate_streaming():
+                        # Stream tokens to the client
+                        streamingMessage = ""
+                        
+                        async for token in stream_response_tokens():
                             # Check if the query was stopped
                             if stop_event.is_set():
                                 # Send a message indicating the query was stopped
@@ -233,11 +243,16 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                                 })
                                 break
                             
+                            # Accumulate the message for the stream_end event
+                            streamingMessage += token
+                            
                             await websocket.send_json({
                                 "type": "stream_token",
                                 "data": token
                             })
                             
+                            await asyncio.sleep(0.01)  # 10ms pause between tokens
+                        
                     except asyncio.TimeoutError:
                         logger.warning(f"Query timeout for user {user_id}")
                         await websocket.send_json({
@@ -261,16 +276,16 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     # End timing
                     elapsed_time = time.time() - start_time
                     logger.info(f"Query processed in {elapsed_time:.2f}s for user {user_id}")
-                    
+
                     # Only send stream_end if we didn't stop early
                     if not stop_event.is_set():
                         # Send "stream_end" message to notify frontend that streaming has completed
                         await websocket.send_json({
                             "type": "stream_end",
-                            "data": full_response
+                            "data": full_response  # This is the full accumulated response
                         })
                         
-                        # Send sources if available
+                        # Get and send sources if available
                         sources = query_engine.get_formatted_sources()
                         await websocket.send_json({
                             "type": "sources",
@@ -306,7 +321,7 @@ async def handle_chat(websocket: WebSocket, user_id: str):
     finally:
         # Clean up on disconnect
         cleanup_user(user_id)
-
+        
 def cleanup_user(user_id: str):
     """Clean up user connections and processing state"""
     if user_id in active_connections:

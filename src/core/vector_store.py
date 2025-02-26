@@ -56,7 +56,7 @@ class VectorStoreManager:
         # Set the node parser for chunking documents
         Settings.node_parser = SentenceSplitter(
             chunk_size=512,
-            chunk_overlap=25,
+            chunk_overlap=100,
             paragraph_separator="\n\n"
         )
         

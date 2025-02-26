@@ -415,7 +415,14 @@
                 // Listen for messages
                 socket.addEventListener('message', function(event) {
                     const data = JSON.parse(event.data);
-                    handleMessage(data);
+                    
+                    // Debug: log all incoming messages
+                    console.log("WebSocket message received:", data.type, data);
+                    
+                    // Process immediately
+                    window.requestAnimationFrame(() => {
+                        handleMessage(data);
+                    });
                 });
 
                 // Connection closed
@@ -460,19 +467,11 @@
                     // Clear input
                     messageInput.value = '';
                     
-                    // Show typing indicator
+                    // Show typing indicator until streaming starts
                     showTypingIndicator();
-                }
-            }
-            
-            function stopQuery() {
-                if (socket && socket.readyState === WebSocket.OPEN && isStreaming) {
-                    socket.send(JSON.stringify({
-                        command: "stop_query"
-                    }));
-                    addSystemMessage("Query stopped by user");
-                    hideTypingIndicator();
-                    stopBtn.classList.add('hidden');
+                    
+                    // Disable send button until response completes
+                    sendBtn.disabled = true;
                 }
             }
 
@@ -497,21 +496,40 @@
                         streamingMessage = '';
                         currentStreamElement = addBotMessage('');
                         stopBtn.classList.remove('hidden');
+                        // Hide typing indicator when streaming starts
+                        hideTypingIndicator();
                         break;
                     
                     case 'stream_token':
                         if (isStreaming && currentStreamElement) {
                             streamingMessage += data.data;
+                            
+                            // Force immediate render of each token
                             currentStreamElement.innerHTML = formatMessageText(streamingMessage);
-                            // Auto-scroll
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                            
+                            // Log every few tokens to verify streaming
+                            if (Math.random() < 0.1) { // Log ~10% of tokens for debugging
+                                console.log("Streaming token received:", data.data);
+                            }
+                            
+                            // Force scroll update
+                            window.requestAnimationFrame(() => {
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            });
                         }
                         break;
                     
                     case 'stream_end':
-                        isStreaming = false;
+                        // Call onStreamEnd to reset UI state
+                        onStreamEnd();
                         hideTypingIndicator();
-                        stopBtn.classList.add('hidden');
+                        
+                        // Make sure we have the complete message at the end
+                        if (currentStreamElement && data.data) {
+                            // Replace the current message with the complete message to ensure consistency
+                            streamingMessage = data.data;
+                            currentStreamElement.innerHTML = formatMessageText(streamingMessage);
+                        }
                         break;
                         
                     case 'query_stopped':
@@ -631,7 +649,7 @@
             // Enable/disable chat
             function enableChat(enabled) {
                 messageInput.disabled = !enabled;
-                sendBtn.disabled = !enabled;
+                sendBtn.disabled = !enabled || isStreaming; // Disable during streaming
             }
 
             // Archive RSS Feed
@@ -695,6 +713,13 @@
             // Hide typing indicator
             function hideTypingIndicator() {
                 typingIndicator.classList.add('hidden');
+            }
+            
+            // Additional function to call when stream ends
+            function onStreamEnd() {
+                sendBtn.disabled = false; // Re-enable send button
+                isStreaming = false;
+                stopBtn.classList.add('hidden');
             }
         });
     </script>

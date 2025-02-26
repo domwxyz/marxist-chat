@@ -63,7 +63,7 @@ class MenuHandlers:
     
     @staticmethod
     def handle_load_chat(query_engine):
-        """Start the chat interface"""
+        """Start the chat interface with streaming support"""
         if not query_engine:
             print("\nError: No query engine loaded. Please run option 3 first.")
             return
@@ -77,10 +77,14 @@ class MenuHandlers:
                 break
                 
             try:
+                # The query method now handles streaming responses and prints tokens
                 response = query_engine.query(query)
-                formatted_output = query_engine.format_response(response)
-                print(formatted_output)
-                # Remove any code here that might be printing "Question:" again
+                print()  # Add a newline after streaming completes
+                
+                # Format the sources
+                if hasattr(response, 'source_nodes') and response.source_nodes:
+                    sources_formatted = query_engine.format_sources_only(response.source_nodes)
+                    print(sources_formatted)
             except Exception as e:
                 print(f"\nError: {e}")
     

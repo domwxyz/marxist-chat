@@ -253,59 +253,98 @@ class QueryEngine:
                     continue
             
         return "\n".join(output)
+        
     def get_formatted_sources(self, max_sources=5):
-        """Return formatted sources from the last query in a format suitable for API responses"""
+        """Return formatted sources from the last query with enhanced metadata lookup"""
         formatted_sources = []
         seen_urls = set()
+        seen_filenames = set()
+        
+        # Make sure metadata repository is loaded
+        if not self.metadata_repository.is_loaded:
+            self.metadata_repository.load_metadata_index()
         
         for node in self.last_sources:
             try:
-                # Extract metadata from the actual content
-                content_lines = node.text.split('\n')
-                metadata = {}
+                # Get source filename from metadata
+                file_name = node.metadata.get('file_name', '')
                 
-                # Parse metadata section
-                in_metadata = False
-                for line in content_lines:
-                    if line.strip() == '---':
-                        if not in_metadata:
-                            in_metadata = True
+                # Skip if we've already seen this file
+                if file_name in seen_filenames:
+                    continue
+                    
+                if file_name:
+                    seen_filenames.add(file_name)
+                    
+                    # Get complete metadata from repository
+                    complete_metadata = self.metadata_repository.get_metadata_by_filename(file_name)
+                    
+                    if complete_metadata:
+                        # Use complete metadata if available
+                        title = complete_metadata.get('title', 'Untitled')
+                        date = complete_metadata.get('date', 'Unknown')
+                        url = complete_metadata.get('url', 'No URL')
+                        author = complete_metadata.get('author', 'Unknown')
+                        
+                        # Skip duplicate URLs
+                        if url in seen_urls:
                             continue
-                        else:
+                        seen_urls.add(url)
+                        
+                        # Get excerpt from node text
+                        excerpt = self._extract_excerpt_from_node(node)
+                        
+                        formatted_sources.append({
+                            "title": title,
+                            "date": date,
+                            "author": author,
+                            "url": url,
+                            "excerpt": excerpt
+                        })
+                        
+                        if len(formatted_sources) >= max_sources:
                             break
-                    if in_metadata:
-                        if ': ' in line:
+                        continue
+                
+                # Fallback to existing method if no complete metadata found
+                title = node.metadata.get('title', 'Untitled')
+                date = node.metadata.get('date', 'Unknown')
+                url = node.metadata.get('url', 'No URL')
+                author = node.metadata.get('author', 'Unknown')
+                
+                # Extract from text as a last resort
+                if title == 'Untitled' or date == 'Unknown' or url == 'No URL':
+                    # Extract metadata from the actual content
+                    content_lines = node.text.split('\n')
+                    metadata = {}
+                    
+                    # Parse metadata section
+                    in_metadata = False
+                    for line in content_lines:
+                        if line.strip() == '---':
+                            if not in_metadata:
+                                in_metadata = True
+                                continue
+                            else:
+                                break
+                        if in_metadata and ': ' in line:
                             key, value = line.split(': ', 1)
                             metadata[key] = value
-                
-                # Use extracted metadata or fallback to node.metadata
-                title = metadata.get('Title') or node.metadata.get('title', 'Untitled')
-                date = metadata.get('Date') or node.metadata.get('date', 'Unknown')
-                url = metadata.get('URL') or node.metadata.get('url', 'No URL')
-                author = metadata.get('Author') or node.metadata.get('author', 'Unknown')
+                            metadata[key.lower()] = value
+                    
+                    # Use extracted metadata if found
+                    title = metadata.get('Title', metadata.get('title', title))
+                    date = metadata.get('Date', metadata.get('date', date))
+                    url = metadata.get('URL', metadata.get('url', url))
+                    author = metadata.get('Author', metadata.get('author', author))
                 
                 # Skip duplicate URLs
                 if url in seen_urls:
                     continue
                 seen_urls.add(url)
                 
-                # Extract relevant text snippet
-                excerpt = ""
-                in_content = False
-                for line in content_lines:
-                    if line.startswith('Content:'):
-                        in_content = True
-                        continue
-                    if in_content and line.strip():
-                        excerpt = line.strip()
-                        break
-                
-                if not excerpt:
-                    excerpt = node.text
-                
-                excerpt = excerpt.strip()
-                if len(excerpt) > 200:
-                    excerpt = excerpt[:200] + "..."
+                # Get excerpt
+                excerpt = self._extract_excerpt_from_node(node)
                 
                 formatted_sources.append({
                     "title": title,
@@ -315,7 +354,6 @@ class QueryEngine:
                     "excerpt": excerpt
                 })
                 
-                # Limit to max_sources sources
                 if len(formatted_sources) >= max_sources:
                     break
                     
@@ -324,6 +362,29 @@ class QueryEngine:
                 continue
                 
         return formatted_sources
+
+    def _extract_excerpt_from_node(self, node):
+        """Helper method to extract a clean excerpt from a node"""
+        excerpt = ""
+        content_lines = node.text.split('\n')
+        in_content = False
+        
+        for line in content_lines:
+            if line.startswith('Content:'):
+                in_content = True
+                continue
+            if in_content and line.strip():
+                excerpt = line.strip()
+                break
+        
+        if not excerpt:
+            excerpt = node.text
+        
+        excerpt = excerpt.strip()
+        if len(excerpt) > 200:
+            excerpt = excerpt[:200] + "..."
+            
+        return excerpt
         
     def test_llm(self):
         """Test if the LLM is functioning properly"""

@@ -112,6 +112,18 @@ class MetadataRepository:
                 metadata[key.lower()] = value
                 
         return metadata
+        
+    def get_metadata_by_filename(self, filename):
+        """Get complete metadata for a document by filename"""
+        if not self.is_loaded:
+            self.load_metadata_index()
+            
+        # Find the metadata entry with matching filename
+        for entry in self.metadata_list:
+            if entry.get('file_name', '') == filename:
+                return entry
+                
+        return None
     
     def get_formatted_context(self, max_entries=100, max_chars=4000):
         """Get a formatted context string for the LLM with document metadata"""

@@ -132,6 +132,17 @@ class MenuHandlers:
             print(f"\nMetadata index rebuilt successfully with {len(metadata_repo.metadata_list)} entries")
         else:
             print("\nFailed to rebuild metadata index")
+            
+    @staticmethod
+    def handle_update_vector_store():
+        """Update the vector store with new RSS feed entries"""
+        vector_store_manager = VectorStoreManager()
+        success = vector_store_manager.update_vector_store()
+        
+        if success:
+            print("\nVector store updated successfully!")
+        else:
+            print("\nFailed to update vector store. Check the error messages above.")
     
     @staticmethod
     def handle_configuration():

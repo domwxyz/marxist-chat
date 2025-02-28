@@ -92,6 +92,92 @@ class FeedProcessor:
         
         print(f"Finished fetching all pages. Total entries: {len(entries)}")
         return entries
+        
+    def fetch_new_entries(self, since_date=None):
+        """Fetch only new entries from RSS feeds since a given date"""
+        all_entries = []
+        
+        if not since_date:
+            print("No date specified, fetching all entries.")
+            return self.fetch_all_feeds()
+            
+        print(f"Fetching entries newer than {since_date}")
+        
+        for feed_url in self.feed_urls:
+            print(f"Processing {feed_url} for new content")
+            entries = []
+            
+            # Similar to fetch_rss_entries but with date filtering
+            # WordPress pagination pattern
+            page = 1
+            has_more = True
+            seen_urls = set()
+            found_article_count = 0
+            
+            while has_more:
+                current_url = f"{feed_url.rstrip('/')}/?paged={page}" if page > 1 else feed_url
+                
+                headers = {'User-Agent': 'Mozilla/5.0 (compatible; RSSBot/1.0)'}
+                feed = feedparser.parse(current_url, request_headers=headers)
+                
+                print(f"Processing page {page}... Found {len(feed.entries)} entries.")
+                
+                if not feed.entries:
+                    print("No entries found on this page.")
+                    has_more = False
+                    break
+                    
+                new_entries_on_page = 0
+                
+                for entry in feed.entries:
+                    entry_url = entry.get('link', '')
+                    
+                    if not entry_url or entry_url in seen_urls:
+                        continue
+                        
+                    # Extract date to check if it's newer than since_date
+                    published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
+                    entry_date = format_date(published_date)
+                    
+                    # Skip if this entry is older than or equal to our cutoff date
+                    if entry_date <= since_date:
+                        print(f"Found entry from {entry_date}, which is not newer than {since_date}")
+                        # If we start seeing older articles, we can stop
+                        found_article_count += 1
+                        if found_article_count >= 3:  # Stop after finding a few older articles
+                            has_more = False
+                            break
+                        continue
+                    
+                    seen_urls.add(entry_url)
+                    entries.append(entry)
+                    all_entries.append(entry)
+                    new_entries_on_page += 1
+                
+                print(f"Added {new_entries_on_page} new entries from page {page}.")
+                    
+                # If no new entries on this page or we've found older content, stop
+                if new_entries_on_page == 0 or not has_more:
+                    has_more = False
+                else:
+                    page += 1
+                    
+                # Check for standard RSS pagination links
+                next_page = None
+                for link in feed.feed.get("links", []):
+                    if link.rel == "next":
+                        next_page = link.href
+                        break
+                
+                if next_page and next_page != current_url:
+                    print(f"Found 'next' link: {next_page}")
+                    feed_url = next_page  # Update base URL
+                    page = 1  # Reset page counter
+                    
+                time.sleep(0.2)  # Respect server resources
+        
+        print(f"Finished fetching new entries. Total: {len(all_entries)}")
+        return all_entries
     
     def extract_metadata_from_entry(self, entry):
         """Extract and format metadata from a feedparser entry - optimized version"""

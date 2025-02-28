@@ -1,14 +1,20 @@
 import shutil
 from pathlib import Path
 from llama_index.core import Settings, VectorStoreIndex, load_index_from_storage, StorageContext
+
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
+from llama_index.core.ingestion import IngestionPipeline
 import chromadb
 import unicodedata
 
+from core.feed_processor import FeedProcessor
 from core.llm_manager import LLMManager
 from core.metadata_repository import MetadataRepository
 import config
+
+CHUNK_SIZE = 512
+CHUNK_OVERLAP = 50
 
 class VectorStoreManager:
     def __init__(self, vector_store_dir=None, cache_dir=None):
@@ -55,13 +61,13 @@ class VectorStoreManager:
         
         # Set the node parser for chunking documents
         Settings.node_parser = SentenceSplitter(
-            chunk_size=512,
-            chunk_overlap=100,
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
             paragraph_separator="\n\n"
         )
         
         print("Embedding model initialized and settings configured.")
-        
+
         try:
             # Initialize ChromaDB
             chroma_collection = self._init_chroma_client()
@@ -91,9 +97,10 @@ class VectorStoreManager:
                     # Extract metadata from text
                     metadata = self._extract_metadata_from_text(text)
                     
-                    # Restructure the text to emphasize metadata at the beginning
-                    # This helps the embedding model capture the relationship between
-                    # metadata and content without changing the actual content
+                    # Ensure filename is in metadata
+                    metadata['file_name'] = file_path.name
+                    
+                    # Restructure the text to emphasize metadata
                     enhanced_text = f"Title: {metadata.get('title', 'Untitled')}\n"
                     enhanced_text += f"Author: {metadata.get('author', 'Unknown')}\n"
                     
@@ -122,13 +129,18 @@ class VectorStoreManager:
             valid_documents = [doc for doc in all_documents if len(doc.text.strip()) > 50]
             print(f"\nProcessing {len(valid_documents)} valid documents...")
             
-            # Create index from documents
+            # Use the default from_documents method, but then manually enhance the nodes after
             index = VectorStoreIndex.from_documents(
                 valid_documents,
                 storage_context=storage_context,
                 show_progress=True,
                 service_context=Settings
             )
+            
+            # Access the nodes in the index and add chunk_id to metadata
+            for node_id, node in index.docstore.docs.items():
+                if hasattr(node, 'metadata') and 'file_name' in node.metadata:
+                    node.metadata['chunk_id'] = f"{node.metadata['file_name']}:{node.start_char_idx}-{node.end_char_idx}"
             
             print("Building metadata index...")
             self.metadata_repository.build_metadata_index(force_rebuild=True)
@@ -162,26 +174,14 @@ class VectorStoreManager:
             Settings.llm = llm
             Settings.embed_model = embed_model
             Settings.node_parser = SentenceSplitter(
-                chunk_size=512,
-                chunk_overlap=100,
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
                 paragraph_separator="\n\n"
             )
             
             # Initialize ChromaDB client
             print("Initializing ChromaDB client...")
-            chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
-            collection_name = "articles"
-            
-            # Check if the collection exists
-            collection_names = chroma_client.list_collections()
-            print(f"Found collections: {collection_names}")
-            
-            if collection_name not in collection_names:
-                print(f"No collection named '{collection_name}' found in ChromaDB")
-                return None
-                
-            # Get the collection
-            chroma_collection = chroma_client.get_collection(collection_name)
+            # Existing ChromaDB initialization...
             
             # Create vector store with the ChromaDB collection
             vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
@@ -191,6 +191,9 @@ class VectorStoreManager:
             from llama_index.core import VectorStoreIndex
             index = VectorStoreIndex.from_vector_store(vector_store)
             
+            # Load metadata repository
+            self.metadata_repository.load_metadata_index()
+            
             print("Vector store loaded successfully!")
             return index
             
@@ -199,6 +202,72 @@ class VectorStoreManager:
             import traceback
             traceback.print_exc()
             return None
+            
+    def update_vector_store(self):
+        """Update the vector store with new documents without rebuilding"""
+        # Check if vector store exists
+        if not self.vector_store_dir.exists():
+            print("\nError: No vector store found. Please create one first.")
+            return False
+            
+        try:
+            # Get the latest document date
+            latest_date = self.get_latest_document_date()
+            if not latest_date:
+                print("\nNo existing documents found. You should create the vector store instead.")
+                return False
+                
+            print(f"\nLooking for documents newer than {latest_date}")
+            
+            # Initialize FeedProcessor
+            feed_processor = FeedProcessor()
+            
+            # Fetch new entries since latest date
+            new_entries = feed_processor.fetch_new_entries(since_date=latest_date)
+            
+            if not new_entries:
+                print("\nNo new entries found in RSS feed.")
+                return True
+                
+            print(f"\nFound {len(new_entries)} new entries. Processing...")
+            
+            # Process new entries and save them to cache
+            new_documents = feed_processor.process_entries(new_entries)
+
+            if not new_documents:
+                print("\nNo new documents were processed.")
+                return True
+                
+            print(f"\nSuccessfully processed {len(new_documents)} new documents.")
+
+            # Load existing vector store
+            index = self.load_vector_store()
+            if not index:
+                print("\nFailed to load vector store.")
+                return False
+
+            # Insert documents into the index
+            for doc in new_documents:
+                # Add document to index
+                nodes = index.insert(doc)
+                
+                # Enhance the newly created nodes
+                for node in nodes:
+                    if hasattr(node, 'metadata') and 'file_name' in node.metadata:
+                        node.metadata['chunk_id'] = f"{node.metadata['file_name']}:{node.start_char_idx}-{node.end_char_idx}"
+
+            # Rebuild metadata index to include new documents
+            print("\nUpdating metadata index...")
+            self.metadata_repository.build_metadata_index(force_rebuild=True)
+            
+            print(f"\nVector store successfully updated with {len(new_documents)} new documents!")
+            return True
+            
+        except Exception as e:
+            print(f"\nError updating vector store: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     def get_document_by_id(self, document_id: str):
         """Retrieve a document by ID (filename)"""
@@ -266,6 +335,21 @@ class VectorStoreManager:
         except Exception as e:
             print(f"Error searching documents: {str(e)}")
             return []
+            
+    def get_latest_document_date(self):
+        """Get the date of the most recent document in the metadata index"""
+        if not self.metadata_repository.is_loaded:
+            self.metadata_repository.load_metadata_index()
+            
+        if not self.metadata_repository.metadata_list:
+            return None
+            
+        # Metadata list is sorted by date (newest first), so get the first entry
+        try:
+            latest_entry = self.metadata_repository.metadata_list[0]
+            return latest_entry.get('date')
+        except (IndexError, KeyError):
+            return None
 
     def _extract_metadata_from_text(self, text: str):
         """Extract metadata section from document text"""

@@ -284,3 +284,22 @@ async def rebuild_metadata_index():
     except Exception as e:
         logger.error(f"Error rebuilding metadata index: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+        
+async def update_vector_store() -> Dict[str, Any]:
+    """Update vector store with new documents from RSS feed"""
+    vector_store_manager = VectorStoreManager()
+    try:
+        success = vector_store_manager.update_vector_store()
+        if success:
+            # Reset query engine to use updated vector store on next query
+            global _query_engine
+            _query_engine = None
+            return {"status": "success", "message": "Vector store updated successfully"}
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Failed to update vector store. Check logs for details."
+            )
+    except Exception as e:
+        logger.error(f"Error updating vector store: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

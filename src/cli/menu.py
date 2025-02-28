@@ -17,6 +17,7 @@ class Menu:
         print("7. Configuration")
         print("8. Test LLM")
         print("9. Rebuild Metadata Index")
+        print("10. Update Vector Store")  # New option
         print("0. Exit")
         print("\nNote: For first time setup, run options 1, 2, 3, and 4 in order.")
     

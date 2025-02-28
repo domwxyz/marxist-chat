@@ -20,7 +20,7 @@ def main():
     while True:
         try:
             Menu.display_main_menu()
-            choice = Menu.get_choice(9)
+            choice = Menu.get_choice(10)
             
             if choice == 0:
                 Menu.exit_program()
@@ -52,6 +52,9 @@ def main():
                 
             elif choice == 9:
                 MenuHandlers.handle_rebuild_metadata_index()
+                
+            elif choice == 10:
+                MenuHandlers.handle_update_vector_store()
                 
         except KeyboardInterrupt:
             print("\nOperation cancelled.")

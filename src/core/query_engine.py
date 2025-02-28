@@ -33,7 +33,14 @@ class QueryEngine:
                 logger.error("Failed to load vector store")
                 return False
                 
-            self.metadata_repository.load_metadata_index()
+            # Load metadata repository
+            success = self.metadata_repository.load_metadata_index()
+            if not success:
+                logger.warning("Failed to load metadata index - attempting to rebuild")
+                success = self.metadata_repository.build_metadata_index()
+                if not success:
+                    logger.error("Failed to build metadata index")
+                    # Continue anyway, as we can fall back to source node metadata
             
             # Create query template - using template that works with Qwen models
             query_template = PromptTemplate(
@@ -51,13 +58,13 @@ class QueryEngine:
             
             # Create a streaming query engine only
             self.query_engine = self.index.as_query_engine(
-                similarity_top_k=4,
+                similarity_top_k=5,
                 node_postprocessors=[
-                    SimilarityPostprocessor(similarity_cutoff=0.4)
+                    SimilarityPostprocessor(similarity_cutoff=0.35)
                 ],
                 text_qa_template=query_template,
                 verbose=True,
-                streaming=True  # Always streaming
+                streaming=True
             )
             
             logger.info("Streaming query engine initialized successfully")
@@ -276,90 +283,76 @@ class QueryEngine:
         seen_urls = set()
         seen_filenames = set()
         
-        # Make sure metadata repository is loaded
+        # Ensure metadata repository is loaded
         if not self.metadata_repository.is_loaded:
             self.metadata_repository.load_metadata_index()
         
         for node in self.last_sources:
             try:
-                # Get source filename from metadata
+                # Get filename from node metadata
                 file_name = node.metadata.get('file_name', '')
+                
+                # If no filename in metadata, try to extract from node text
+                if not file_name:
+                    # Try to extract from document embedded in chunk
+                    node_metadata = self._extract_embedded_metadata(node.text)
+                    file_name = node_metadata.get('file_name', '')
+                    
+                    # If still no filename, we can't correlate this chunk
+                    if not file_name:
+                        logger.debug(f"Could not find filename for node: {node.text[:100]}...")
+                        continue
                 
                 # Skip if we've already seen this file
                 if file_name in seen_filenames:
                     continue
+                seen_filenames.add(file_name)
+                
+                # Look up complete metadata from repository
+                complete_metadata = self.metadata_repository.get_metadata_by_filename(file_name)
+                
+                if complete_metadata:
+                    # Use complete metadata from repository
+                    title = complete_metadata.get('title', 'Untitled')
+                    date = complete_metadata.get('date', 'Unknown')
+                    url = complete_metadata.get('url', 'No URL')
+                    author = complete_metadata.get('author', 'Unknown')
                     
-                if file_name:
-                    seen_filenames.add(file_name)
-                    
-                    # Get complete metadata from repository
-                    complete_metadata = self.metadata_repository.get_metadata_by_filename(file_name)
-                    
-                    if complete_metadata:
-                        # Use complete metadata if available
-                        title = complete_metadata.get('title', 'Untitled')
-                        date = complete_metadata.get('date', 'Unknown')
-                        url = complete_metadata.get('url', 'No URL')
-                        author = complete_metadata.get('author', 'Unknown')
-                        
-                        # Skip duplicate URLs
-                        if url in seen_urls:
-                            continue
-                        seen_urls.add(url)
-                        
-                        # Get excerpt from node text
-                        excerpt = self._extract_excerpt_from_node(node)
-                        
-                        formatted_sources.append({
-                            "title": title,
-                            "date": date,
-                            "author": author,
-                            "url": url,
-                            "excerpt": excerpt
-                        })
-                        
-                        if len(formatted_sources) >= max_sources:
-                            break
+                    # Skip duplicate URLs
+                    if url in seen_urls:
                         continue
+                    seen_urls.add(url)
+                    
+                    # Get excerpt from node text
+                    excerpt = self._extract_excerpt_from_node(node)
+                    
+                    formatted_sources.append({
+                        "title": title,
+                        "date": date,
+                        "author": author,
+                        "url": url,
+                        "excerpt": excerpt
+                    })
+                    
+                    logger.debug(f"Added source with metadata from repository: {title}")
+                    
+                    if len(formatted_sources) >= max_sources:
+                        break
+                    continue
                 
                 # Fallback to existing method if no complete metadata found
+                logger.debug(f"No metadata found in repository for {file_name}, using node metadata")
                 title = node.metadata.get('title', 'Untitled')
                 date = node.metadata.get('date', 'Unknown')
                 url = node.metadata.get('url', 'No URL')
                 author = node.metadata.get('author', 'Unknown')
-                
-                # Extract from text as a last resort
-                if title == 'Untitled' or date == 'Unknown' or url == 'No URL':
-                    # Extract metadata from the actual content
-                    content_lines = node.text.split('\n')
-                    metadata = {}
-                    
-                    # Parse metadata section
-                    in_metadata = False
-                    for line in content_lines:
-                        if line.strip() == '---':
-                            if not in_metadata:
-                                in_metadata = True
-                                continue
-                            else:
-                                break
-                        if in_metadata and ': ' in line:
-                            key, value = line.split(': ', 1)
-                            metadata[key] = value
-                            metadata[key.lower()] = value
-                    
-                    # Use extracted metadata if found
-                    title = metadata.get('Title', metadata.get('title', title))
-                    date = metadata.get('Date', metadata.get('date', date))
-                    url = metadata.get('URL', metadata.get('url', url))
-                    author = metadata.get('Author', metadata.get('author', author))
                 
                 # Skip duplicate URLs
                 if url in seen_urls:
                     continue
                 seen_urls.add(url)
                 
-                # Get excerpt
+                # Get excerpt from node text
                 excerpt = self._extract_excerpt_from_node(node)
                 
                 formatted_sources.append({
@@ -447,6 +440,29 @@ class QueryEngine:
         
         return "\n".join(output)
 
+    def _extract_embedded_metadata(self, text):
+        """Extract metadata embedded in node text"""
+        metadata = {}
+        if not text:
+            return metadata
+            
+        lines = text.split('\n')
+        in_metadata = False
+        
+        for line in lines:
+            if line.strip() == "---":
+                if not in_metadata:
+                    in_metadata = True
+                    continue
+                else:
+                    break
+                    
+            if in_metadata and ": " in line:
+                key, value = line.split(": ", 1)
+                metadata[key.lower()] = value
+        
+        return metadata
+    
     def _extract_excerpt_from_node(self, node):
         """Helper method to extract a clean excerpt from a node"""
         excerpt = ""

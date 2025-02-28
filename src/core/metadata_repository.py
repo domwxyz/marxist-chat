@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from llama_index.core.schema import BaseNode
 import logging
 
 logger = logging.getLogger("core.metadata_repository")
@@ -11,6 +12,7 @@ class MetadataRepository:
         self.metadata_file = cache_dir / "metadata_index.json"
         self.metadata_list = []
         self.is_loaded = False
+        self.filename_index = {}  # Index for quick filename lookups
     
     def build_metadata_index(self, force_rebuild=False):
         """Build or rebuild the metadata index from cached documents"""
@@ -60,6 +62,9 @@ class MetadataRepository:
         # Sort by date (newest first)
         self.metadata_list.sort(key=lambda x: x.get("date", ""), reverse=True)
         
+        # Build the filename index for fast lookups
+        self._build_filename_index()
+        
         # Save to file
         self._save_metadata_index()
         
@@ -76,12 +81,26 @@ class MetadataRepository:
         try:
             with open(self.metadata_file, "r", encoding="utf-8") as f:
                 self.metadata_list = json.load(f)
+            
+            # Build the filename index for fast lookups
+            self._build_filename_index()
+            
             logger.info(f"Loaded metadata index with {len(self.metadata_list)} entries")
             self.is_loaded = True
             return True
         except Exception as e:
             logger.error(f"Error loading metadata index: {e}")
             return False
+    
+    def _build_filename_index(self):
+        """Build an index for fast filename lookups"""
+        self.filename_index = {}
+        for entry in self.metadata_list:
+            filename = entry.get("file_name")
+            if filename:
+                self.filename_index[filename] = entry
+        
+        logger.info(f"Built filename index with {len(self.filename_index)} entries")
     
     def _save_metadata_index(self):
         """Save the metadata index to file"""
@@ -118,12 +137,8 @@ class MetadataRepository:
         if not self.is_loaded:
             self.load_metadata_index()
             
-        # Find the metadata entry with matching filename
-        for entry in self.metadata_list:
-            if entry.get('file_name', '') == filename:
-                return entry
-                
-        return None
+        # Use the filename index for fast lookup
+        return self.filename_index.get(filename)
     
     def get_formatted_context(self, max_entries=100, max_chars=4000):
         """Get a formatted context string for the LLM with document metadata"""
@@ -164,3 +179,4 @@ class MetadataRepository:
                 break
         
         return "\n".join(context_parts)
+        

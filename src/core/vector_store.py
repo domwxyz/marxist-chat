@@ -181,14 +181,24 @@ class VectorStoreManager:
             
             # Initialize ChromaDB client
             print("Initializing ChromaDB client...")
-            # Existing ChromaDB initialization...
-            
-            # Create vector store with the ChromaDB collection
-            vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+            self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
+            collection_name = "articles"
+
+            # Check if the collection exists
+            collection_names = self.chroma_client.list_collections()  # Now directly returns names
+            print(f"Found collections: {collection_names}")
+
+            if not collection_names or collection_name not in collection_names:
+                print(f"No collection named '{collection_name}' found in ChromaDB")
+                return None
+
+            # Get the collection
+            self.chroma_collection = self.chroma_client.get_collection(collection_name)
+
+            vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
             
             # Create a new index with the existing vector store
             print("Creating index from the ChromaDB vector store...")
-            from llama_index.core import VectorStoreIndex
             index = VectorStoreIndex.from_vector_store(vector_store)
             
             # Load metadata repository

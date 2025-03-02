@@ -90,22 +90,21 @@ class QueryEngine:
             # Use streaming query engine
             streaming_response = self.query_engine.query(query_text)
             
+            # Access the source nodes early if possible
+            if hasattr(streaming_response, 'source_nodes'):
+                self.last_sources = streaming_response.source_nodes
+            elif hasattr(streaming_response, '_source_nodes'):
+                self.last_sources = streaming_response._source_nodes
+            
             # Collect all tokens from the streaming response to create a complete response
             response_text = ""
             for text in streaming_response.response_gen:
                 response_text += text
                 # Print the token for CLI feedback
                 print(text, end="", flush=True)
-            
-            # Store sources for later retrieval
-            if hasattr(streaming_response, 'source_nodes'):
-                self.last_sources = streaming_response.source_nodes
-            elif hasattr(streaming_response, '_source_nodes'):
-                # Some versions of llama-index store source nodes in a private attribute
-                self.last_sources = streaming_response._source_nodes
-            else:
-                logger.warning("No source nodes found in streaming response")
-            
+                # We'll now return each token individually through our stream_query method
+                # No need to collect them here
+                
             # Check if response is empty or no sources were found
             if (not response_text.strip() or len(self.last_sources) == 0):
                 print("\nDEBUG: Empty response from RAG, using metadata fallback")

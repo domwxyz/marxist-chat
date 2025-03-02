@@ -107,7 +107,7 @@ async def handle_websocket_connection(websocket: WebSocket, user_id: str):
             cleanup_user(user_id)
 
 async def handle_chat(websocket: WebSocket, user_id: str):
-    """Handle active chat WebSocket interaction with proper async generator handling"""
+    """Handle active chat WebSocket interaction with proper async streaming"""
     try:
         # Initialize query engine
         query_engine = await get_query_engine()
@@ -188,52 +188,20 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     stop_event = asyncio.Event()
                     query_stop_events[user_id] = stop_event
                     
-                    # Process the query
+                    # Process the query with streaming
                     logger.info(f"Processing query with streaming: {query_text[:100]}...")
                     
                     try:
-                        # Get the response - this gets the full response and source nodes
-                        response = query_engine.query(query_text)
-                        
-                        # Store the full response text
-                        full_response = str(response.response)
-                        
-                        # Store sources for later retrieval
-                        if hasattr(response, 'source_nodes'):
-                            query_engine.last_sources = response.source_nodes
-                        
-                        # Create a streaming generator that splits the response into tokens
-                        async def stream_response_tokens():
-                            # Split the response into tokens (simple word-by-word approach)
-                            tokens = []
-                            for paragraph in full_response.split('\n'):
-                                for word in paragraph.split(' '):
-                                    if word:  # Skip empty words
-                                        tokens.append(word + ' ')
-                                if paragraph:  # Only add newline for non-empty paragraphs
-                                    tokens.append('\n')
-                            
-                            # Stream the tokens
-                            for token in tokens:
-                                # Check if the query was stopped
-                                if stop_event.is_set():
-                                    return
-                                
-                                yield token
-                                
-                                # Add a small delay to simulate streaming
-                                await asyncio.sleep(0.02)
-                        
-                        # Create a streaming task
+                        # Create a streaming task that uses the stream_query method directly
                         stream_task = asyncio.create_task(
-                            anext(stream_response_tokens().__aiter__())
+                            query_engine.stream_query(query_text, stop_event).__anext__()
                         )
                         active_queries[user_id] = stream_task
                         
-                        # Stream tokens to the client
-                        streamingMessage = ""
+                        # Stream tokens to the client in real-time
+                        full_response = ""
                         
-                        async for token in stream_response_tokens():
+                        async for token in query_engine.stream_query(query_text, stop_event):
                             # Check if the query was stopped
                             if stop_event.is_set():
                                 # Send a message indicating the query was stopped
@@ -244,14 +212,15 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                                 break
                             
                             # Accumulate the message for the stream_end event
-                            streamingMessage += token
+                            full_response += token
                             
+                            # Send the token immediately to the frontend
                             await websocket.send_json({
                                 "type": "stream_token",
                                 "data": token
                             })
                             
-                            await asyncio.sleep(0.01)  # 10ms pause between tokens
+                            # No need for artificial delay - let the network handle it
                         
                     except asyncio.TimeoutError:
                         logger.warning(f"Query timeout for user {user_id}")
@@ -284,6 +253,16 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                             "type": "stream_end",
                             "data": full_response  # This is the full accumulated response
                         })
+                        
+                        # Store the sources for future retrieval if not already set
+                        if not query_engine.last_sources and hasattr(query_engine, 'query_engine'):
+                            # Try to extract sources from the query engine directly
+                            try:
+                                response = query_engine.query_engine.query(query_text)
+                                if hasattr(response, 'source_nodes'):
+                                    query_engine.last_sources = response.source_nodes
+                            except:
+                                pass
                         
                         # Get and send sources if available
                         sources = query_engine.get_formatted_sources()

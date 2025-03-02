@@ -502,20 +502,12 @@
                     
                     case 'stream_token':
                         if (isStreaming && currentStreamElement) {
+                            // Add each token immediately to the displayed message
                             streamingMessage += data.data;
-                            
-                            // Force immediate render of each token
                             currentStreamElement.innerHTML = formatMessageText(streamingMessage);
                             
-                            // Log every few tokens to verify streaming
-                            if (Math.random() < 0.1) { // Log ~10% of tokens for debugging
-                                console.log("Streaming token received:", data.data);
-                            }
-                            
-                            // Force scroll update
-                            window.requestAnimationFrame(() => {
-                                chatMessages.scrollTop = chatMessages.scrollHeight;
-                            });
+                            // Force scroll update with each token
+                            chatMessages.scrollTop = chatMessages.scrollHeight;
                         }
                         break;
                     
@@ -536,6 +528,7 @@
                         isStreaming = false;
                         hideTypingIndicator();
                         stopBtn.classList.add('hidden');
+                        sendBtn.disabled = false;
                         addSystemMessage(data.message || "Query was stopped");
                         break;
                     
@@ -550,10 +543,22 @@
                         addSystemMessage(`Error: ${data.message}`);
                         hideTypingIndicator();
                         stopBtn.classList.add('hidden');
+                        sendBtn.disabled = false;
                         break;
                     
                     default:
                         console.log('Unhandled message type:', data.type);
+                }
+            }
+
+            // Add function to stop query
+            function stopQuery() {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    // Send stop command to server
+                    socket.send(JSON.stringify({
+                        command: "stop_query"
+                    }));
+                    console.log("Stop query command sent");
                 }
             }
 

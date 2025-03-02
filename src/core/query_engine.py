@@ -278,7 +278,7 @@ class QueryEngine:
         return "\n".join(output)
         
     def get_formatted_sources(self, max_sources=5):
-        """Return formatted sources from the last query with enhanced metadata lookup"""
+        """Return formatted sources from the last query with robust metadata retrieval"""
         formatted_sources = []
         seen_urls = set()
         seen_filenames = set()
@@ -287,24 +287,21 @@ class QueryEngine:
         if not self.metadata_repository.is_loaded:
             self.metadata_repository.load_metadata_index()
         
+        # If we don't have source nodes, return empty list
+        if not self.last_sources:
+            logger.warning("No source nodes available")
+            return formatted_sources
+        
+        # Add import for regex at the top of file if needed
+        import re
+            
         for node in self.last_sources:
             try:
-                # Get filename from node metadata
-                file_name = node.metadata.get('file_name', '')
+                # Extract filename using our helper method
+                file_name = self._extract_filename_from_node(node)
                 
-                # If no filename in metadata, try to extract from node text
-                if not file_name:
-                    # Try to extract from document embedded in chunk
-                    node_metadata = self._extract_embedded_metadata(node.text)
-                    file_name = node_metadata.get('file_name', '')
-                    
-                    # If still no filename, we can't correlate this chunk
-                    if not file_name:
-                        logger.debug(f"Could not find filename for node: {node.text[:100]}...")
-                        continue
-                
-                # Skip if we've already seen this file
-                if file_name in seen_filenames:
+                # Skip if we can't identify the file or already processed it
+                if not file_name or file_name in seen_filenames:
                     continue
                 seen_filenames.add(file_name)
                 
@@ -319,7 +316,7 @@ class QueryEngine:
                     author = complete_metadata.get('author', 'Unknown')
                     
                     # Skip duplicate URLs
-                    if url in seen_urls:
+                    if url in seen_urls and url != 'No URL':
                         continue
                     seen_urls.add(url)
                     
@@ -338,17 +335,46 @@ class QueryEngine:
                     
                     if len(formatted_sources) >= max_sources:
                         break
+                        
+                    # Continue to next node
                     continue
                 
-                # Fallback to existing method if no complete metadata found
-                logger.debug(f"No metadata found in repository for {file_name}, using node metadata")
+                # If we get here, we couldn't find metadata in the repository
+                # Try to extract it directly from the node text
+                metadata = {}
+                
+                # First, check node.metadata for any useful information
                 title = node.metadata.get('title', 'Untitled')
                 date = node.metadata.get('date', 'Unknown')
                 url = node.metadata.get('url', 'No URL')
                 author = node.metadata.get('author', 'Unknown')
                 
+                # Then try to extract from node text if available
+                if hasattr(node, 'text') and node.text:
+                    # Try to extract from embedded metadata block first
+                    title_match = re.search(r'Title: (.*?)\n', node.text)
+                    if title_match:
+                        title = title_match.group(1).strip() or title
+                    
+                    date_match = re.search(r'Date: (.*?)\n', node.text)
+                    if date_match:
+                        date = date_match.group(1).strip() or date
+                        
+                    author_match = re.search(r'Author: (.*?)\n', node.text)
+                    if author_match:
+                        author = author_match.group(1).strip() or author
+                        
+                    url_match = re.search(r'URL: (.*?)\n', node.text)
+                    if url_match:
+                        url = url_match.group(1).strip() or url
+                
+                # Skip documents with insufficient metadata
+                if title == 'Untitled' and url == 'No URL':
+                    logger.debug(f"Skipping node with insufficient metadata for file: {file_name}")
+                    continue
+                    
                 # Skip duplicate URLs
-                if url in seen_urls:
+                if url in seen_urls and url != 'No URL':
                     continue
                 seen_urls.add(url)
                 
@@ -357,19 +383,38 @@ class QueryEngine:
                 
                 formatted_sources.append({
                     "title": title,
-                    "date": date,
+                    "date": date, 
                     "author": author,
                     "url": url,
                     "excerpt": excerpt
                 })
+                
+                logger.debug(f"Added source with extracted metadata: {title}")
                 
                 if len(formatted_sources) >= max_sources:
                     break
                     
             except Exception as e:
                 logger.error(f"Error formatting source: {e}")
+                logger.error(traceback.format_exc())
                 continue
                 
+        # Final fallback - if we have no sources but have nodes, create basic entries
+        if not formatted_sources and self.last_sources:
+            logger.warning("Using fallback source formatting")
+            for i, node in enumerate(self.last_sources[:max_sources]):
+                try:
+                    excerpt = self._extract_excerpt_from_node(node)
+                    formatted_sources.append({
+                        "title": f"Source {i+1}",
+                        "date": "Unknown",
+                        "author": "Unknown",
+                        "url": "No URL",
+                        "excerpt": excerpt
+                    })
+                except Exception:
+                    continue
+        
         return formatted_sources
         
     def format_sources_only(self, source_nodes):
@@ -378,9 +423,64 @@ class QueryEngine:
         seen_sources = set()  # Track unique sources
         source_counter = 1  # Explicit counter for sources
         
+        # Load the metadata repository if not already loaded
+        if not self.metadata_repository.is_loaded:
+            self.metadata_repository.load_metadata_index()
+
         for node in source_nodes:
             try:
-                # Extract metadata from the actual content
+                # First extract the filename to look up metadata
+                file_name = self._extract_filename_from_node(node)
+                
+                # If we couldn't find a filename, try alternate extraction methods
+                if not file_name:
+                    # Try direct extraction from node text
+                    node_metadata = self._extract_embedded_metadata(node.text)
+                    content_lines = node.text.split('\n')
+                    
+                    # Look for file name in text
+                    for line in content_lines:
+                        if line.startswith("File:"):
+                            file_name = line.split(":", 1)[1].strip()
+                            break
+                
+                # Try to get complete metadata from repository
+                metadata = {}
+                if file_name:
+                    complete_metadata = self.metadata_repository.get_metadata_by_filename(file_name)
+                    if complete_metadata:
+                        # Use metadata from repository
+                        title = complete_metadata.get('title', 'Untitled')
+                        date = complete_metadata.get('date', 'Unknown')
+                        url = complete_metadata.get('url', 'No URL')
+                        author = complete_metadata.get('author', 'Unknown')
+                        
+                        source_id = f"{title}:{date}:{url}"
+                        
+                        # Skip duplicate sources
+                        if source_id in seen_sources:
+                            continue
+                        seen_sources.add(source_id)
+                        
+                        # Format source information
+                        output.append(f"\n{source_counter}. {title}")
+                        output.append(f"   Date: {date}")
+                        output.append(f"   Author: {author}")
+                        output.append(f"   URL: {url}")
+                        
+                        # Extract and clean the content for the excerpt
+                        excerpt = self._extract_excerpt_from_node(node)
+                        output.append(f"   Relevant excerpt: {excerpt}\n")
+                        
+                        # Increment source counter
+                        source_counter += 1
+                        
+                        # Limit to 5 unique sources
+                        if source_counter > 5:
+                            break
+                        continue
+                
+                # Fallback to metadata extraction from node text if repository lookup failed
                 content_lines = node.text.split('\n')
                 metadata = {}
                 
@@ -417,12 +517,6 @@ class QueryEngine:
                 output.append(f"   Author: {author}")
                 output.append(f"   URL: {url}")
                 
-                categories_str = metadata.get('Categories') or ''
-                categories_list = [cat.strip() for cat in categories_str.split(',') if cat.strip()]
-            
-                if categories_list:
-                    output.append(f"   Categories: {', '.join(categories_list)}")
-                
                 # Extract and clean the content for the excerpt
                 excerpt = self._extract_excerpt_from_node(node)
                 output.append(f"   Relevant excerpt: {excerpt}\n")
@@ -435,7 +529,9 @@ class QueryEngine:
                     break
                     
             except Exception as e:
-                logger.error(f"Error formatting source: {str(e)}")
+                import traceback
+                print(f"Error formatting source: {str(e)}")
+                print(traceback.format_exc())
                 continue
         
         return "\n".join(output)
@@ -462,6 +558,44 @@ class QueryEngine:
                 metadata[key.lower()] = value
         
         return metadata
+        
+    def _extract_filename_from_node(self, node):
+        """Extract filename from node using multiple strategies"""
+        # First try chunk_id
+        chunk_id = node.metadata.get('chunk_id', '')
+        if chunk_id and ':' in chunk_id:
+            return chunk_id.split(':', 1)[0]
+        
+        # Try direct filename
+        file_name = node.metadata.get('file_name', '')
+        if file_name:
+            return file_name
+        
+        # Try embedded metadata
+        if hasattr(node, 'text') and node.text:
+            # Try to extract from embedded metadata
+            node_metadata = self._extract_embedded_metadata(node.text)
+            file_name = node_metadata.get('file_name', '')
+            if file_name:
+                return file_name
+            
+            # Try to find it in the text
+            import re
+            file_match = re.search(r'File: (.*?)\n', node.text)
+            if file_match:
+                return file_match.group(1).strip()
+            
+            # Try to match by title if possible
+            title_match = re.search(r'Title: (.*?)\n', node.text)
+            if title_match and self.metadata_repository.is_loaded:
+                title = title_match.group(1).strip()
+                # Search metadata repository for this title
+                for meta in self.metadata_repository.metadata_list:
+                    if meta.get('title', '') == title:
+                        return meta.get('file_name', '')
+        
+        # No filename found
+        return ''
     
     def _extract_excerpt_from_node(self, node):
         """Helper method to extract a clean excerpt from a node"""

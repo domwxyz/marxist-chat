@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from llama_index.core import Settings, VectorStoreIndex, load_index_from_storage, StorageContext
+from llama_index.core import Settings, Document, VectorStoreIndex, load_index_from_storage, StorageContext
 
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.vector_stores.chroma import ChromaVectorStore
@@ -38,7 +38,7 @@ class VectorStoreManager:
         return self.chroma_collection
     
     def create_vector_store(self, overwrite=False):
-        """Create a new vector store from cached documents"""
+        """Create a new vector store from cached documents with improved metadata preservation"""
         if not self.cache_dir.exists() or not any(self.cache_dir.iterdir()):
             print("\nError: No RSS archive found. Please archive RSS feed first.")
             return None
@@ -54,17 +54,26 @@ class VectorStoreManager:
                 return None
                 
         print("\nInitializing embedding model...")
-        embed_model = LLMManager.initialize_embedding_model()
-        
-        # Set the embedding model in Settings before creating the index
-        Settings.embed_model = embed_model
-        
-        # Set the node parser for chunking documents
-        Settings.node_parser = SentenceSplitter(
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP,
-            paragraph_separator="\n\n"
-        )
+
+        try:
+            embed_model = LLMManager.initialize_embedding_model()
+            print("Embedding model initialized successfully")
+            
+            # Set the embedding model in Settings
+            Settings.embed_model = embed_model
+            
+            Settings.node_parser = SentenceSplitter(
+                chunk_size=CHUNK_SIZE,
+                chunk_overlap=CHUNK_OVERLAP,
+                paragraph_separator="\n\n"
+            )
+            
+            print("Node parser initialized successfully")
+        except Exception as e:
+            print(f"\nERROR initializing models: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
         
         print("Embedding model initialized and settings configured.")
 
@@ -101,13 +110,15 @@ class VectorStoreManager:
                     metadata['file_name'] = file_path.name
                     
                     # Restructure the text to emphasize metadata
+                    # This makes it more likely to be captured within each chunk
                     enhanced_text = f"Title: {metadata.get('title', 'Untitled')}\n"
                     enhanced_text += f"Author: {metadata.get('author', 'Unknown')}\n"
                     
                     if 'categories' in metadata:
                         enhanced_text += f"Categories: {metadata.get('categories', '')}\n"
                         
-                    enhanced_text += f"Date: {metadata.get('date', 'Unknown')}\n\n"
+                    enhanced_text += f"Date: {metadata.get('date', 'Unknown')}\n"
+                    enhanced_text += f"File: {metadata.get('file_name', '')}\n\n"
                     
                     # Append the original text
                     enhanced_text += text
@@ -115,7 +126,6 @@ class VectorStoreManager:
                     # Apply consistent normalization for all text content
                     enhanced_text = unicodedata.normalize('NFKC', enhanced_text)
                     
-                    from llama_index.core import Document
                     all_documents.append(Document(text=enhanced_text, metadata=metadata))
                     
                     if i % 100 == 0:
@@ -129,7 +139,7 @@ class VectorStoreManager:
             valid_documents = [doc for doc in all_documents if len(doc.text.strip()) > 50]
             print(f"\nProcessing {len(valid_documents)} valid documents...")
             
-            # Use the default from_documents method, but then manually enhance the nodes after
+            # Create the index with standard chunking
             index = VectorStoreIndex.from_documents(
                 valid_documents,
                 storage_context=storage_context,
@@ -137,11 +147,40 @@ class VectorStoreManager:
                 service_context=Settings
             )
             
-            # Access the nodes in the index and add chunk_id to metadata
-            for node_id, node in index.docstore.docs.items():
-                if hasattr(node, 'metadata') and 'file_name' in node.metadata:
-                    node.metadata['chunk_id'] = f"{node.metadata['file_name']}:{node.start_char_idx}-{node.end_char_idx}"
+            # Post-process: explicitly copy metadata to each node in the index
+            print("Post-processing nodes to ensure metadata is preserved...")
+            try:
+                # Access the nodes in the index and ensure metadata is preserved
+                for node_id, node in index.docstore.docs.items():
+                    if hasattr(node, 'metadata'):
+                        # Extract document ID from node
+                        doc_id = node.ref_doc_id
+                        
+                        # Try to find the source document metadata
+                        file_name = node.metadata.get('file_name', '')
+                        source_doc = None
+                        
+                        # Try to find the source document by file_name if it's not in node metadata
+                        if not file_name:
+                            for doc in valid_documents:
+                                if doc.doc_id == doc_id:
+                                    source_doc = doc
+                                    break
+                        
+                        # If we found the source document, copy its metadata
+                        if source_doc and hasattr(source_doc, 'metadata'):
+                            for key in ['file_name', 'title', 'date', 'author', 'url', 'categories']:
+                                if key in source_doc.metadata and key not in node.metadata:
+                                    node.metadata[key] = source_doc.metadata[key]
+                        
+                        # Add chunk_id to metadata if file_name is available
+                        if 'file_name' in node.metadata:
+                            node.metadata['chunk_id'] = f"{node.metadata['file_name']}:{node.start_char_idx}-{node.end_char_idx}"
+            except Exception as e:
+                print(f"Warning: Error during node post-processing: {e}")
+                # Continue anyway - this is a best-effort enhancement
             
+            # Build metadata index
             print("Building metadata index...")
             self.metadata_repository.build_metadata_index(force_rebuild=True)
             
@@ -150,6 +189,8 @@ class VectorStoreManager:
             
         except Exception as e:
             print(f"\nError creating vector store: {e}")
+            import traceback
+            traceback.print_exc()
             if self.vector_store_dir.exists():
                 try:
                     shutil.rmtree(self.vector_store_dir)
@@ -295,7 +336,6 @@ class VectorStoreManager:
             metadata = self._extract_metadata_from_text(text)
             metadata["file_name"] = f"{document_id}.txt"
             
-            from llama_index.core import Document
             return Document(text=text, metadata=metadata)
         except Exception as e:
             print(f"Error loading document {document_id}: {str(e)}")
@@ -312,7 +352,6 @@ class VectorStoreManager:
             
         try:
             # Import embedding model for query embedding
-            from core.llm_manager import LLMManager
             embed_model = LLMManager.initialize_embedding_model()
             
             # Get query embedding
@@ -337,7 +376,6 @@ class VectorStoreManager:
                     score = 1.0 - min(1.0, distance)
                     
                     # Create document object
-                    from llama_index.core import Document
                     doc = Document(text=doc_text, metadata=metadata)
                     documents_with_scores.append((doc, score))
                     
@@ -380,6 +418,43 @@ class VectorStoreManager:
                 metadata[key] = value
                 
         return metadata
+        
+    def _extract_filename_from_node(self, node):
+        """Extract filename from node using multiple strategies"""
+        # First try chunk_id
+        chunk_id = node.metadata.get('chunk_id', '')
+        if chunk_id and ':' in chunk_id:
+            return chunk_id.split(':', 1)[0]
+        
+        # Try direct filename
+        file_name = node.metadata.get('file_name', '')
+        if file_name:
+            return file_name
+        
+        # Try embedded metadata
+        if hasattr(node, 'text') and node.text:
+            # Try to extract from embedded metadata
+            node_metadata = self._extract_embedded_metadata(node.text)
+            file_name = node_metadata.get('file_name', '')
+            if file_name:
+                return file_name
+            
+            # Try to find it in the text
+            file_match = re.search(r'File: (.*?)\n', node.text)
+            if file_match:
+                return file_match.group(1).strip()
+            
+            # Try to match by title if possible
+            title_match = re.search(r'Title: (.*?)\n', node.text)
+            if title_match and self.metadata_repository.is_loaded:
+                title = title_match.group(1).strip()
+                # Search metadata repository for this title
+                for meta in self.metadata_repository.metadata_list:
+                    if meta.get('title', '') == title:
+                        return meta.get('file_name', '')
+        
+        # No filename found
+        return ''
 
     def _vector_store_loaded(self):
         """Check if vector store is loaded"""
@@ -392,7 +467,6 @@ class VectorStoreManager:
                 self._init_chroma_client()
             
             # Get embedding model
-            from core.llm_manager import LLMManager
             embed_model = LLMManager.initialize_embedding_model()
             
             # Search directly in the collection

@@ -416,9 +416,6 @@
                 socket.addEventListener('message', function(event) {
                     const data = JSON.parse(event.data);
                     
-                    // Debug: log all incoming messages
-                    console.log("WebSocket message received:", data.type, data);
-                    
                     // Process immediately
                     window.requestAnimationFrame(() => {
                         handleMessage(data);

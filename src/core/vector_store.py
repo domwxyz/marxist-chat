@@ -42,22 +42,45 @@ class VectorStoreManager:
         """Get paths to all documents across all feed directories"""
         all_paths = []
         
+        # Use absolute paths to avoid resolution issues
+        cache_dir = self.cache_dir.absolute()
+        print(f"DEBUG: Using absolute cache path: {cache_dir}")
+        
         # First check if there are any documents directly in the cache directory (old structure)
-        direct_files = list(self.cache_dir.glob("*.txt"))
+        direct_files = list(cache_dir.glob("*.txt"))
+        print(f"DEBUG: Found {len(direct_files)} direct files")
         if direct_files:
             all_paths.extend(direct_files)
             
         # Then check all subdirectories (new structure)
-        for subdir in self.cache_dir.iterdir():
-            if subdir.is_dir():
-                subdir_files = list(subdir.glob("*.txt"))
-                all_paths.extend(subdir_files)
-                
+        subdirs = [d for d in cache_dir.iterdir() if d.is_dir()]
+        print(f"DEBUG: Found {len(subdirs)} subdirectories")
+        
+        for subdir in subdirs:
+            print(f"DEBUG: Checking subdir: {subdir}")
+            subdir_files = list(subdir.glob("*.txt"))
+            print(f"DEBUG: Found {len(subdir_files)} files in {subdir.name}")
+            all_paths.extend(subdir_files)
+        
+        print(f"DEBUG: Total document paths found: {len(all_paths)}")    
         return all_paths
     
     def create_vector_store(self, overwrite=False):
         """Create a new vector store from cached documents with improved metadata preservation"""
         all_document_paths = self._get_all_document_paths()
+        
+        # Add debugging
+        print(f"DEBUG: Cache directory: {self.cache_dir} (exists: {self.cache_dir.exists()})")
+        print(f"DEBUG: Found {len(all_document_paths)} document paths")
+        if len(all_document_paths) > 0:
+            print(f"DEBUG: First few paths: {[str(p) for p in all_document_paths[:3]]}")
+        
+        # Print subdirectory contents
+        subdirs = [d for d in self.cache_dir.iterdir() if d.is_dir()]
+        print(f"DEBUG: Found {len(subdirs)} subdirectories in {self.cache_dir}")
+        for subdir in subdirs:
+            files = list(subdir.glob("*.txt"))
+            print(f"DEBUG: Subdir {subdir.name} contains {len(files)} .txt files")
         
         if not all_document_paths:
             print("\nError: No RSS archive found. Please archive RSS feed first.")
@@ -608,4 +631,3 @@ class VectorStoreManager:
             import traceback
             print(traceback.format_exc())
             return None
-            

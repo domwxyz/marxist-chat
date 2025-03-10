@@ -33,13 +33,30 @@ class MenuHandlers:
     @staticmethod
     def handle_create_vector_store():
         """Create a new vector store"""
+        print("DEBUG: Starting create_vector_store handler")
         vector_store_manager = VectorStoreManager()
         
         # First, check if the RSS cache exists and has content
         cache_dir_has_content = False
         if config.CACHE_DIR.exists():
-            cache_dir_has_content = any(config.CACHE_DIR.glob("*.txt"))
+            print(f"DEBUG: Cache dir exists at {config.CACHE_DIR}")
+            # Check for files directly in cache dir
+            direct_files = list(config.CACHE_DIR.glob("*.txt"))
+            print(f"DEBUG: Found {len(direct_files)} files directly in cache dir")
             
+            # Check subdirectories
+            subdirs = [d for d in config.CACHE_DIR.iterdir() if d.is_dir()]
+            print(f"DEBUG: Found {len(subdirs)} subdirectories")
+            
+            for subdir in subdirs:
+                subdir_files = list(subdir.glob("*.txt"))
+                print(f"DEBUG: Subdir {subdir.name} has {len(subdir_files)} files")
+                if subdir_files:
+                    cache_dir_has_content = True
+            
+            # Original check
+            cache_dir_has_content = cache_dir_has_content or any(config.CACHE_DIR.glob("*.txt"))
+                
         if not cache_dir_has_content:
             print("\nError: No RSS archive found or archive is empty. Please run option 1 first.")
             return
@@ -52,6 +69,7 @@ class MenuHandlers:
             if not Menu.confirm_action("Vector store already exists. Do you want to recreate it?"):
                 return
         
+        print("DEBUG: Calling vector_store_manager.create_vector_store")
         vector_store_manager.create_vector_store(overwrite=True)
     
     @staticmethod

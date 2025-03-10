@@ -1,10 +1,14 @@
 # Marxist Chat API Documentation
 
-This document outlines the API endpoints and WebSocket connections available for frontend integration with the Marxist Chat system.
+This document outlines the API endpoints and WebSocket connections available for integrating with the Marxist Chat system. All examples assume the API is running at `http://localhost:8000`.
 
 ## Base URL
 
 All API endpoints are prefixed with `/api/v1`.
+
+## Authentication
+
+The current API implementation does not include authentication. For production deployments, it's recommended to implement authentication for admin endpoints like `/api/v1/queue/clear` and `/api/v1/service/restart`.
 
 ## REST API Endpoints
 
@@ -30,163 +34,6 @@ Get system status information including connection counts.
   "queue_length": 2,
   "max_concurrent_users": 30,
   "status": "online"
-}
-```
-
-### Queue Management
-
-#### GET `/api/v1/queue`
-Get detailed queue status and current position information.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "queue_length": 8,
-  "active_connections": 30,
-  "max_concurrent_users": 30,
-  "estimated_wait_time": 960,
-  "queue_details": [
-    {
-      "position": 1,
-      "user_id": "user_abc123",
-      "wait_time": 120,
-      "estimated_remaining": 840
-    },
-    ...
-  ]
-}
-```
-
-#### POST `/api/v1/queue/clear`
-Admin endpoint to clear the waiting queue.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Cleared 8 connections from the waiting queue"
-}
-```
-
-### RSS and Vector Store Management
-
-#### POST `/api/v1/archive-rss`
-Trigger an RSS feed archiving operation.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Successfully archived 150 RSS feed entries",
-  "document_count": 150
-}
-```
-
-#### POST `/api/v1/create-vector-store`
-Create or recreate the vector store from archived documents.
-
-**Query Parameters:**
-- `overwrite` (boolean, default: false): Whether to overwrite an existing vector store
-
-**Response:**
-```json
-{
-  "status": "success",
-  "message": "Vector store created successfully"
-}
-```
-
-### Document Access
-
-#### GET `/api/v1/documents/{document_id}`
-Get a specific document by ID.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "document": {
-    "id": "2023-05-01_building-worker-power",
-    "title": "Building Worker Power Through Unions",
-    "date": "2023-05-01",
-    "author": "John Smith",
-    "url": "https://communistusa.org/2023/05/building-worker-power",
-    "text": "Unions are not simply economic organizations but schools of class struggle..."
-  }
-}
-```
-
-#### GET `/api/v1/documents/search`
-Search for documents matching a text query.
-
-**Query Parameters:**
-- `query` (string, required): Search query text
-- `limit` (integer, default: 10): Maximum number of results to return
-
-**Response:**
-```json
-{
-  "status": "success",
-  "results": [
-    {
-      "id": "2023-05-01_building-worker-power",
-      "title": "Building Worker Power Through Unions",
-      "date": "2023-05-01",
-      "url": "https://communistusa.org/2023/05/building-worker-power",
-      "relevance_score": 0.92,
-      "excerpt": "Unions are not simply economic organizations but schools of class struggle..."
-    },
-    ...
-  ],
-  "count": 5,
-  "query": "labor unions"
-}
-```
-
-### Model Information
-
-#### GET `/api/v1/model-info`
-Get information about the current LLM model.
-
-**Response:**
-```json
-{
-  "status": "success",
-  "model": {
-    "name": "Qwen2.5-3B-Instruct-Q4_K_M",
-    "url": "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-    "size": "small (~2GB)",
-    "quantization": "4-bit (Q4_K_M)",
-    "threads": 4,
-    "temperature": 0.2
-  }
-}
-```
-
-### Statistics
-
-#### GET `/api/v1/feed-stats`
-Get statistics about RSS feeds and archived documents.
-
-**Response:**
-```json
-{
-  "feed_count": 3,
-  "document_count": 3200,
-  "feeds": ["https://communistusa.org/feed", "..."]
-}
-```
-
-#### GET `/api/v1/vector-store-stats`
-Get statistics about the vector store.
-
-**Response:**
-```json
-{
-  "status": "ok",
-  "exists": true,
-  "node_count": 12500
 }
 ```
 
@@ -233,7 +80,160 @@ Get a simplified summary of system metrics.
 }
 ```
 
-### Query
+### Content Management
+
+#### POST `/api/v1/archive-rss`
+Trigger an RSS feed archiving operation.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Successfully archived 150 RSS feed entries",
+  "document_count": 150
+}
+```
+
+#### POST `/api/v1/create-vector-store`
+Create or recreate the vector store from archived documents.
+
+**Query Parameters:**
+- `overwrite` (boolean, default: false): Whether to overwrite an existing vector store
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Vector store created successfully"
+}
+```
+
+#### POST `/api/v1/update-vector-store`
+Update the vector store with new articles without rebuilding. Compares dates to only add new content.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Vector store updated successfully"
+}
+```
+
+#### POST `/api/v1/rebuild-metadata-index`
+Rebuild the metadata index from cached documents.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Metadata index rebuilt successfully with 3245 entries"
+}
+```
+
+### Document Access
+
+#### GET `/api/v1/feed-stats`
+Get statistics about RSS feeds and archived documents.
+
+**Response:**
+```json
+{
+  "total_feeds": 2,
+  "feeds": [
+    "https://communistusa.org/feed",
+    "https://marxist.com/index.php?format=feed"
+  ],
+  "feeds_by_directory": {
+    "communistusa-org": {
+      "count": 1850,
+      "feed_url": "https://communistusa.org/feed",
+      "path": "/app/posts_cache/communistusa-org"
+    },
+    "marxist-com": {
+      "count": 1350,
+      "feed_url": "https://marxist.com/index.php?format=feed",
+      "path": "/app/posts_cache/marxist-com"
+    }
+  },
+  "total_documents": 3200
+}
+```
+
+#### GET `/api/v1/vector-store-stats`
+Get statistics about the vector store.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "exists": true,
+  "node_count": 12500
+}
+```
+
+#### GET `/api/v1/documents/{document_id}`
+Get a specific document by ID.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "document": {
+    "id": "2023-05-01_building-worker-power",
+    "title": "Building Worker Power Through Unions",
+    "date": "2023-05-01",
+    "author": "John Smith",
+    "url": "https://communistusa.org/2023/05/building-worker-power",
+    "text": "Unions are not simply economic organizations but schools of class struggle..."
+  }
+}
+```
+
+#### GET `/api/v1/documents/search`
+Search for documents matching a text query.
+
+**Query Parameters:**
+- `query` (string, required): Search query text
+- `limit` (integer, default: 10): Maximum number of results to return
+
+**Response:**
+```json
+{
+  "status": "success",
+  "results": [
+    {
+      "id": "2023-05-01_building-worker-power",
+      "title": "Building Worker Power Through Unions",
+      "date": "2023-05-01",
+      "url": "https://communistusa.org/2023/05/building-worker-power",
+      "relevance_score": 0.92,
+      "excerpt": "Unions are not simply economic organizations but schools of class struggle..."
+    }
+  ],
+  "count": 5,
+  "query": "labor unions"
+}
+```
+
+#### GET `/api/v1/model-info`
+Get information about the current LLM model.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "model": {
+    "name": "Qwen2.5-3B-Instruct-Q4_K_M",
+    "url": "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+    "size": "small (~2GB)",
+    "quantization": "4-bit (Q4_K_M)",
+    "threads": 4,
+    "temperature": 0.2
+  }
+}
+```
+
+### Query Processing
 
 #### POST `/api/v1/query`
 Process a text query and return a response with sources.
@@ -255,8 +255,7 @@ Process a text query and return a response with sources.
       "date": "2023-05-01",
       "url": "https://communistusa.org/2023/05/building-worker-power",
       "excerpt": "Unions are not simply economic organizations but schools of class struggle..."
-    },
-    ...
+    }
   ]
 }
 ```
@@ -269,6 +268,41 @@ Stop an in-progress query for a specific user.
 {
   "status": "success",
   "message": "Query stopped for user user_abc123"
+}
+```
+
+### Queue Management
+
+#### GET `/api/v1/queue`
+Get detailed queue status and current position information.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "queue_length": 8,
+  "active_connections": 30,
+  "max_concurrent_users": 30,
+  "estimated_wait_time": 960,
+  "queue_details": [
+    {
+      "position": 1,
+      "user_id": "user_abc123",
+      "wait_time": 120,
+      "estimated_remaining": 840
+    }
+  ]
+}
+```
+
+#### POST `/api/v1/queue/clear`
+Admin endpoint to clear the waiting queue.
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Cleared 8 connections from the waiting queue"
 }
 ```
 
@@ -287,7 +321,7 @@ Admin endpoint to restart the service components.
 
 ## WebSocket API
 
-### Chat Connection
+### Chat Connections
 
 #### WebSocket `/api/v1/ws/chat/{user_id}`
 Connect to the chat interface with a specific user ID.
@@ -295,7 +329,7 @@ Connect to the chat interface with a specific user ID.
 #### WebSocket `/api/v1/ws/chat`
 Connect to the chat interface with an auto-generated user ID.
 
-### WebSocket Message Formats
+### Message Types
 
 #### Client to Server Messages
 
@@ -340,14 +374,6 @@ Connect to the chat interface with an auto-generated user ID.
 }
 ```
 
-**Query Stopped Messages:**
-```json
-{
-  "type": "query_stopped",
-  "message": "Query was stopped by user request."
-}
-```
-
 **Error Messages:**
 ```json
 {
@@ -365,19 +391,17 @@ Connect to the chat interface with an auto-generated user ID.
       "title": "Healthcare as a Human Right",
       "date": "2023-02-15",
       "url": "https://communistusa.org/2023/02/healthcare-human-right",
-      "excerpt": "Access to healthcare is a fundamental human right that should not be commodified..."
-    },
-    ...
+      "excerpt": "Access to healthcare is a fundamental human right..."
+    }
   ]
 }
 ```
 
-### Streaming WebSocket Messages
+### Streaming Messages
 
-The WebSocket API supports token-by-token streaming for a more responsive user experience. The streaming process consists of the following message types:
+The WebSocket API supports token-by-token streaming for a more responsive user experience:
 
 **Stream Start Message:**
-Indicates the beginning of a streaming response.
 ```json
 {
   "type": "stream_start"
@@ -385,7 +409,6 @@ Indicates the beginning of a streaming response.
 ```
 
 **Stream Token Message:**
-Contains a single token of the streaming response. These messages will be sent continuously as tokens are generated.
 ```json
 {
   "type": "stream_token",
@@ -394,7 +417,6 @@ Contains a single token of the streaming response. These messages will be sent c
 ```
 
 **Stream End Message:**
-Indicates the end of a streaming response and contains the complete response.
 ```json
 {
   "type": "stream_end",
@@ -402,15 +424,21 @@ Indicates the end of a streaming response and contains the complete response.
 }
 ```
 
-After the streaming is complete, the system will send a "sources" message with relevant source information.
+**Query Stopped Message:**
+```json
+{
+  "type": "query_stopped",
+  "message": "Query was stopped by user request."
+}
+```
 
-## Frontend Implementation Examples
+## Implementation Examples
 
 ### WebSocket Streaming Implementation
 
 ```javascript
-// Connect to WebSocket as usual
-const socket = new WebSocket('ws://your-server.com/api/v1/ws/chat');
+// Connect to WebSocket
+const socket = new WebSocket('ws://localhost:8000/api/v1/ws/chat');
 
 // Variables to track streaming state
 let isStreaming = false;
@@ -425,7 +453,6 @@ socket.onmessage = function(event) {
       isStreaming = true;
       streamingMessage = '';
       responseElement.innerHTML = '';
-      // Show a stop button
       document.getElementById('stop-btn').classList.remove('hidden');
       break;
       
@@ -433,7 +460,6 @@ socket.onmessage = function(event) {
       if (isStreaming) {
         streamingMessage += data.data;
         responseElement.innerHTML = streamingMessage;
-        // Auto-scroll to show new content
         responseElement.scrollTop = responseElement.scrollHeight;
       }
       break;
@@ -441,22 +467,17 @@ socket.onmessage = function(event) {
     case 'stream_end':
       isStreaming = false;
       document.getElementById('stop-btn').classList.add('hidden');
-      // Final response is in data.data if needed
       break;
       
     case 'query_stopped':
       isStreaming = false;
       document.getElementById('stop-btn').classList.add('hidden');
-      // Add a note that the query was stopped
       responseElement.innerHTML += '<br><em>Query stopped</em>';
       break;
       
     case 'sources':
-      // Display sources as before
       displaySources(data.data);
       break;
-      
-    // Handle other message types as before
   }
 };
 
@@ -468,12 +489,33 @@ document.getElementById('stop-btn').addEventListener('click', function() {
     }));
   }
 });
+
+// Send a query
+function sendQuery(text) {
+  socket.send(JSON.stringify({ message: text }));
+}
+
+// Display sources in the UI
+function displaySources(sources) {
+  const sourcesContainer = document.getElementById('sources');
+  sourcesContainer.innerHTML = '';
+  
+  sources.forEach(source => {
+    const sourceElement = document.createElement('div');
+    sourceElement.className = 'source';
+    sourceElement.innerHTML = `
+      <h4>${source.title} (${source.date})</h4>
+      <p>${source.excerpt}</p>
+      <a href="${source.url}" target="_blank">Read more</a>
+    `;
+    sourcesContainer.appendChild(sourceElement);
+  });
+}
 ```
 
 ### Document Search Implementation
 
 ```javascript
-// Simple document search function
 async function searchDocuments(query) {
   try {
     const response = await fetch(`/api/v1/documents/search?query=${encodeURIComponent(query)}&limit=5`);
@@ -508,7 +550,7 @@ async function searchDocuments(query) {
 
 ## Error Handling
 
-All API endpoints use standard HTTP status codes for error responses:
+All API endpoints use standard HTTP status codes:
 
 - 200: Success
 - 400: Bad Request (invalid parameters)
@@ -516,7 +558,7 @@ All API endpoints use standard HTTP status codes for error responses:
 - 422: Validation Error (invalid input)
 - 500: Internal Server Error
 
-Error responses have a consistent format:
+Error responses follow a consistent format:
 
 ```json
 {
@@ -529,10 +571,3 @@ Error responses have a consistent format:
 ## Rate Limiting
 
 The system includes implicit rate limiting through the queue system. Once the maximum number of concurrent connections is reached, new users are placed in a queue. This prevents overloading the server while providing a reasonable user experience.
-
-## Authentication
-
-The current API does not include authentication. For production use, it's recommended to implement authentication for admin endpoints such as:
-
-- `/api/v1/queue/clear`
-- `/api/v1/service/restart`

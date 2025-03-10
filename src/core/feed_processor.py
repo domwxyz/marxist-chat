@@ -3,7 +3,9 @@ import feedparser
 from datetime import datetime
 from pathlib import Path
 from llama_index.core import Document
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import os
+import re
 
 from utils.text_utils import ensure_unicode, preprocess_content, clean_rss_boilerplate
 from utils.metadata_utils import clean_category, sanitize_filename, format_date, format_metadata
@@ -11,39 +13,110 @@ import config
 
 class FeedProcessor:
     def __init__(self, feed_urls=None, cache_dir=None):
-        self.feed_urls = feed_urls or config.RSS_FEED_URLS
-        self.cache_dir = cache_dir or config.CACHE_DIR
-        self.cache_dir.mkdir(exist_ok=True)
+        # If feed_urls is provided, use it; otherwise, use URLs from config
+        if feed_urls:
+            self.feed_urls = feed_urls
+            # Create a simple config for each provided URL (assuming standard pagination)
+            self.feed_configs = {url: {"url": url, "pagination_type": "standard"} for url in feed_urls}
+        else:
+            # Use the URLs and configurations from config.RSS_FEED_CONFIG
+            self.feed_urls = [feed_config["url"] for feed_config in config.RSS_FEED_CONFIG]
+            self.feed_configs = self._build_feed_config_map()
+            
+        self.base_cache_dir = cache_dir or config.CACHE_DIR
+        self.base_cache_dir.mkdir(exist_ok=True)
+    
+    def _build_feed_config_map(self):
+        """Build a mapping of feed URLs to their configuration"""
+        feed_config_map = {}
+        for feed_config in config.RSS_FEED_CONFIG:
+            feed_config_map[feed_config["url"]] = feed_config
+        return feed_config_map
+        
+    def _get_feed_directory_name(self, feed_url: str) -> str:
+        """Convert a feed URL to a safe directory name"""
+        # Extract domain from URL
+        domain_match = re.search(r'https?://(?:www\.)?([^/]+)', feed_url)
+        if domain_match:
+            domain = domain_match.group(1)
+            # Replace dots and slashes with hyphens
+            return domain.replace('.', '-').replace('/', '-')
+        else:
+            # Fallback to a sanitized version of the URL
+            sanitized = re.sub(r'[^\w\-]', '-', feed_url)
+            return sanitized[:50]  # Limit length
+    
+    def _get_feed_cache_dir(self, feed_url: str) -> Path:
+        """Get the cache directory for a specific feed"""
+        feed_dir_name = self._get_feed_directory_name(feed_url)
+        feed_cache_dir = self.base_cache_dir / feed_dir_name
+        feed_cache_dir.mkdir(exist_ok=True)
+        return feed_cache_dir
         
     def fetch_all_feeds(self):
         """Fetch and process all configured RSS feeds"""
         all_entries = []
         for feed_url in self.feed_urls:
             print(f"Processing {feed_url}")
-            entries = self.fetch_rss_entries(feed_url)
-            all_entries.extend(entries)
+            feed_entries = self.fetch_rss_entries(feed_url)
+            # Add source feed information to each entry
+            for entry in feed_entries:
+                entry['_feed_url'] = feed_url  # Add source feed URL for tracking
+            all_entries.extend(feed_entries)
         
         print(f"Found {len(all_entries)} total entries")
         return all_entries
     
     def fetch_rss_entries(self, feed_url):
-        """Fetch all entries from WordPress RSS feed with pagination - optimized version"""
+        """Fetch all entries from RSS feed with pagination support for different CMS types"""
         entries = []
-        page = 1
-        has_more = True
         seen_urls = set()  # Use a set for faster duplicate checking
         
         print(f"Fetching articles from {feed_url}")
         
+        # Get feed configuration
+        feed_config = self.feed_configs.get(feed_url, {"pagination_type": "standard"})
+        pagination_type = feed_config.get("pagination_type", "standard")
+        
+        # Initialize pagination variables
+        page = 1  # For WordPress
+        limitstart = 0  # For Joomla
+        limit_increment = feed_config.get("limit_increment", 5)  # Default increment for Joomla feeds
+        has_more = True
+        
         while has_more:
-            # Handle WordPress pagination pattern
-            current_url = f"{feed_url.rstrip('/')}/?paged={page}" if page > 1 else feed_url
+            # Handle pagination based on feed type
+            if pagination_type == "joomla":
+                # Joomla pagination with limitstart
+                if "format=feed" in feed_url:
+                    base_url = feed_url.split("?")[0]
+                    current_url = f"{base_url}?format=feed&limitstart={limitstart}"
+                else:
+                    # Handle case where feed_url doesn't already have format=feed
+                    if "?" in feed_url:
+                        current_url = f"{feed_url}&format=feed&limitstart={limitstart}"
+                    else:
+                        current_url = f"{feed_url}?format=feed&limitstart={limitstart}"
+                        
+                pagination_desc = f"limitstart={limitstart}"
+            elif pagination_type == "wordpress":
+                # WordPress pagination
+                current_url = f"{feed_url.rstrip('/')}/?paged={page}" if page > 1 else feed_url
+                pagination_desc = f"page {page}"
+            else:
+                # Standard/unknown pagination - just use the URL as is
+                current_url = feed_url
+                pagination_desc = "first page"
+                # For unknown pagination types, we'll only process the first page
+                has_more = False
+            
+            print(f"Fetching from URL: {current_url}")
             
             # Add a user agent to avoid being blocked
             headers = {'User-Agent': 'Mozilla/5.0 (compatible; RSSBot/1.0)'}
             feed = feedparser.parse(current_url, request_headers=headers)
             
-            print(f"Processing page {page}... Found {len(feed.entries)} entries.")
+            print(f"Processing {pagination_desc}... Found {len(feed.entries)} entries.")
             
             if not feed.entries:
                 print("No entries found on this page. Moving to next URL if available.")
@@ -65,17 +138,23 @@ class FeedProcessor:
                 entries.append(entry)
                 new_entries += 1
             
-            print(f"Added {new_entries} new entries from page {page}.")
+            print(f"Added {new_entries} new entries.")
                 
-            # WordPress pagination fallback logic
+            # Update pagination based on feed type
             if new_entries == 0:
                 print("No new entries found on this page.")
                 has_more = False
             else:
-                page += 1
-                print(f"Moving to page {page}...")
+                if pagination_type == "joomla":
+                    # For Joomla, increment the limitstart parameter
+                    limitstart += limit_increment
+                    print(f"Moving to limitstart={limitstart}...")
+                elif pagination_type == "wordpress":
+                    # For WordPress, increment the page number
+                    page += 1
+                    print(f"Moving to page {page}...")
 
-            # Check for standard RSS pagination links
+            # Check for standard RSS pagination links (works with some feeds)
             next_page = None
             for link in feed.feed.get("links", []):
                 if link.rel == "next":
@@ -86,13 +165,18 @@ class FeedProcessor:
             if next_page and next_page != current_url:
                 print(f"Switching to next URL: {next_page}")
                 feed_url = next_page  # Update base URL if different
-                page = 1  # Reset page counter
-                
+                if pagination_type == "joomla":
+                    # Reset limitstart if we're switching to a completely different URL
+                    limitstart = 0
+                elif pagination_type == "wordpress":
+                    # Reset page counter if we're switching to a different URL
+                    page = 1
+                    
             time.sleep(0.2)  # Respect server resources
         
         print(f"Finished fetching all pages. Total entries: {len(entries)}")
         return entries
-        
+    
     def fetch_new_entries(self, since_date=None):
         """Fetch only new entries from RSS feeds since a given date"""
         all_entries = []
@@ -107,20 +191,45 @@ class FeedProcessor:
             print(f"Processing {feed_url} for new content")
             entries = []
             
-            # Similar to fetch_rss_entries but with date filtering
-            # WordPress pagination pattern
-            page = 1
+            # Get feed configuration
+            feed_config = self.feed_configs.get(feed_url, {"pagination_type": "standard"})
+            pagination_type = feed_config.get("pagination_type", "standard")
+            
+            # Initialize pagination variables
+            page = 1  # For WordPress
+            limitstart = 0  # For Joomla
+            limit_increment = feed_config.get("limit_increment", 5)  # Default increment for Joomla feeds
             has_more = True
             seen_urls = set()
             found_article_count = 0
             
             while has_more:
-                current_url = f"{feed_url.rstrip('/')}/?paged={page}" if page > 1 else feed_url
-                
+                # Handle pagination based on feed type
+                if pagination_type == "joomla":
+                    # Joomla pagination with limitstart
+                    if "format=feed" in feed_url:
+                        base_url = feed_url.split("?")[0]
+                        current_url = f"{base_url}?format=feed&limitstart={limitstart}"
+                    else:
+                        # Handle case where feed_url doesn't already have format=feed
+                        if "?" in feed_url:
+                            current_url = f"{feed_url}&format=feed&limitstart={limitstart}"
+                        else:
+                            current_url = f"{feed_url}?format=feed&limitstart={limitstart}"
+                    pagination_desc = f"limitstart={limitstart}"
+                elif pagination_type == "wordpress":
+                    # WordPress pagination
+                    current_url = f"{feed_url.rstrip('/')}/?paged={page}" if page > 1 else feed_url
+                    pagination_desc = f"page {page}"
+                else:
+                    # Standard/unknown pagination - just use the URL as is
+                    current_url = feed_url
+                    pagination_desc = "first page"
+                    
                 headers = {'User-Agent': 'Mozilla/5.0 (compatible; RSSBot/1.0)'}
                 feed = feedparser.parse(current_url, request_headers=headers)
                 
-                print(f"Processing page {page}... Found {len(feed.entries)} entries.")
+                print(f"Processing {pagination_desc}... Found {len(feed.entries)} entries.")
                 
                 if not feed.entries:
                     print("No entries found on this page.")
@@ -149,18 +258,27 @@ class FeedProcessor:
                             break
                         continue
                     
+                    # Add feed_url to entry for source tracking
+                    entry['_feed_url'] = feed_url
+                    
                     seen_urls.add(entry_url)
                     entries.append(entry)
                     all_entries.append(entry)
                     new_entries_on_page += 1
                 
-                print(f"Added {new_entries_on_page} new entries from page {page}.")
+                print(f"Added {new_entries_on_page} new entries.")
                     
                 # If no new entries on this page or we've found older content, stop
                 if new_entries_on_page == 0 or not has_more:
                     has_more = False
                 else:
-                    page += 1
+                    # Update pagination variables based on the feed type
+                    if pagination_type == "joomla":
+                        limitstart += limit_increment
+                        print(f"Moving to limitstart={limitstart}...")
+                    elif pagination_type == "wordpress":
+                        page += 1
+                        print(f"Moving to page {page}...")
                     
                 # Check for standard RSS pagination links
                 next_page = None
@@ -172,7 +290,12 @@ class FeedProcessor:
                 if next_page and next_page != current_url:
                     print(f"Found 'next' link: {next_page}")
                     feed_url = next_page  # Update base URL
-                    page = 1  # Reset page counter
+                    
+                    # Reset pagination counters when changing URLs
+                    if pagination_type == "joomla":
+                        limitstart = 0
+                    elif pagination_type == "wordpress":
+                        page = 1
                     
                 time.sleep(0.2)  # Respect server resources
         
@@ -186,6 +309,7 @@ class FeedProcessor:
         published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
         author = entry.get('author', 'Unknown Author')
         url = entry.get('link', 'No URL')
+        feed_url = entry.get('_feed_url', 'Unknown Feed')
         
         # Format date only once
         formatted_date = format_date(published_date)
@@ -232,6 +356,8 @@ class FeedProcessor:
             "date": formatted_date,
             "author": author,
             "url": url,
+            "feed_url": feed_url,
+            "feed_name": self._get_feed_directory_name(feed_url),
             "categories": categories
         }
     
@@ -261,14 +387,13 @@ class FeedProcessor:
             print("No entries to process.")
             return []
             
-        # Ensure cache directory exists
-        self.cache_dir.mkdir(exist_ok=True)
-        
         documents = []
-        last_known_date = datetime.now().strftime('%Y-%m-%d')  # Default fallback
         
-        # Pre-compute existing filenames to avoid repeated directory checks
-        existing_filenames = set(f.name for f in self.cache_dir.glob("*.txt"))
+        # Generate a list of existing files for each feed source
+        existing_files_by_feed = {}
+        for feed_url in self.feed_urls:
+            feed_cache_dir = self._get_feed_cache_dir(feed_url)
+            existing_files_by_feed[feed_url] = set(f.name for f in feed_cache_dir.glob("*.txt"))
         
         print(f"Processing {len(entries)} entries...")
         
@@ -280,7 +405,16 @@ class FeedProcessor:
             
             for entry in batch:
                 try:
-                    # Extract metadata from the full feedparser entry - more efficient
+                    # Get the source feed URL (added during fetching)
+                    feed_url = entry.get('_feed_url', self.feed_urls[0])  # Default to first feed if not found
+                    
+                    # Get the cache directory for this feed
+                    feed_cache_dir = self._get_feed_cache_dir(feed_url)
+                    
+                    # Track last known date per feed
+                    last_known_date = datetime.now().strftime('%Y-%m-%d')  # Default fallback
+                    
+                    # Extract metadata from the full feedparser entry
                     metadata = self.extract_metadata_from_entry(entry)
                     
                     # If we got a valid date, update our last_known_date
@@ -290,20 +424,20 @@ class FeedProcessor:
                         # Use the last known date if this entry's date is missing/unknown
                         metadata['date'] = last_known_date
                     
-                    # Generate safe filename 
+                    # Generate safe filename
                     date_prefix = metadata['date']
                     safe_title = sanitize_filename(metadata['title'])
                     filename = f"{date_prefix}_{safe_title}.txt"
                     
-                    # Check against pre-computed set - much faster than checking file existence repeatedly
+                    # Check against existing files for this feed
                     counter = 1
                     original_filename = filename
-                    while filename in existing_filenames:
+                    while filename in existing_files_by_feed.get(feed_url, set()):
                         filename = f"{date_prefix}_{safe_title}-{counter}.txt"
                         counter += 1
                     
                     # Add to our tracking set for future checks in the same batch
-                    existing_filenames.add(filename)
+                    existing_files_by_feed.setdefault(feed_url, set()).add(filename)
                     
                     # Add filename to metadata
                     metadata['file_name'] = filename
@@ -331,7 +465,7 @@ class FeedProcessor:
                         text=document_text,
                         metadata=metadata
                     )
-                    batch_documents.append(doc)
+                    batch_documents.append((doc, feed_url))
                     documents.append(doc)
                     
                 except Exception as e:
@@ -347,11 +481,15 @@ class FeedProcessor:
 
     def _write_documents_batch(self, documents):
         """Write a batch of documents to files - optimized file writing"""
-        for doc in documents:
+        for doc, feed_url in documents:
             try:
-                filepath = self.cache_dir / doc.metadata["file_name"]
+                # Use the feed-specific cache directory
+                feed_cache_dir = self._get_feed_cache_dir(feed_url)
+                filepath = feed_cache_dir / doc.metadata["file_name"]
+                
                 with open(filepath, "w", encoding="utf-8", errors="replace") as f:
                     f.write(doc.text)
             except Exception as e:
                 print(f"Error writing document {doc.metadata.get('file_name', 'unknown')}: {str(e)}")
                 continue
+                

@@ -1,48 +1,30 @@
 # Marxist Chat
 
-A RAG (Retrieval Augmented Generation) chatbot for articles from communistusa.org. This application allows users to chat with content from RSS feeds, with a focus on Revolutionary Communists of America (RCA) articles.
+## What is Marxist Chat?
 
-## Project Overview
+Marxist Chat is a RAG (Retrieval Augmented Generation) chatbot that allows users to interact with content primarily from the RSS feed at communistusa.org. The application indexes articles, creates a searchable vector database, and uses this knowledge to generate responses to user queries.
 
-The project has been restructured from a monolithic script into a modular application that supports:
+The system retrieves relevant document sections from the vector store, feeds them as context to a language model, and generates responses that include direct attribution to source materials. This ensures all responses are grounded in the actual content from the indexed articles.
 
-1. A command-line interface (CLI) for local usage
-2. A FastAPI web server for remote access
-3. WebSocket support for real-time chat interactions with token-by-token streaming
-4. A queueing system for handling concurrent users
-5. A simple web interface for interacting with the chatbot
-6. Kubernetes deployment for scaling and high availability
+## Core Functionality
 
-## Features
+- **Article Collection**: Downloads and processes articles from RSS feeds
+- **Vector Database**: Creates searchable embeddings of document content
+- **Chat Interface**: Provides both command-line and web-based interfaces
+- **Real-time Responses**: Streams token-by-token responses for better user experience
+- **Source Attribution**: Cites specific articles used to generate each response
 
-- **Real-time Streaming**: Token-by-token streaming via WebSockets for a responsive chat experience
-- **Interruptible Queries**: Stop in-progress queries via WebSocket commands or REST API
-- **Concurrent User Support**: Handles multiple users with a queueing system for overflow
-- **Document Search**: Search and retrieve specific documents from the archive
-- **Source Attribution**: Responses include relevant source information with titles, dates, and URLs
-- **Metrics Collection**: System metrics for monitoring application health and performance
-- **Scalable Architecture**: Designed for horizontal scaling with Kubernetes
-- **Simple Web Interface**: Built-in frontend for easy interaction
+Users can query about specific communist topics, and the system will provide information based solely on the indexed content, with references to the original articles.
 
-## Requirements
+# Installation Instructions
 
-- Python 3.8+
-- Required Python packages:
-  - llama-index-core >= 0.10.0
-  - llama-index-llms-llama-cpp >= 0.1.0
-  - llama-index-embeddings-huggingface >= 0.1.0
-  - llama-index-vector-stores-chroma >= 0.1.0
-  - chromadb >= 0.4.13
-  - feedparser >= 6.0.0
-  - chardet >= 5.0.0
-  - fastapi >= 0.104.0
-  - uvicorn >= 0.23.0
-  - pydantic >= 2.0.0
-  - python-dotenv >= 1.0.0
-  - websockets >= 11.0.0
-  - psutil >= 5.9.0 (optional, for metrics collection)
+## Prerequisites
 
-## Installation
+- Python 3.8 or newer
+- 2-10GB disk space for models (depending on model selection)
+- 4GB+ RAM recommended
+
+## Basic Installation
 
 1. Clone the repository:
    ```bash
@@ -55,50 +37,124 @@ The project has been restructured from a monolithic script into a modular applic
    pip install -r requirements.txt
    ```
 
-3. Copy the example environment file and edit it with your settings:
+3. Copy and configure the environment file:
    ```bash
    cp .env.example .env
+   # Edit .env with appropriate settings
    ```
+
+## Docker Installation
+
+If you prefer using Docker:
+
+```bash
+docker build -t marxist-chat .
+docker run -p 8000:8000 -v ./posts_cache:/app/posts_cache -v ./vector_store:/app/vector_store -v ./logs:/app/logs marxist-chat
+```
+
+## First-Time Setup
+
+After installation, you'll need to:
+
+1. Run the application:
+   ```bash
+   # CLI mode
+   python src/main.py
+   
+   # Web server mode
+   python src/app.py
+   ```
+
+2. For CLI mode, follow the menu prompts to:
+   - Archive RSS feeds (Option 1)
+   - Create the vector store (Option 2)
+   - Load the vector store (Option 3)
+   - Start the chat interface (Option 4)
+
+3. For web mode, access http://localhost:8000 and use the web interface to perform the same setup steps.
+
+The first-time setup will download the selected language model and embedding model, which may take several minutes depending on your internet connection.
+
+## Configuration
+
+Edit `.env` or modify `src/config.py` to customize:
+
+- RSS feed URLs
+- Embedding and LLM models
+- Server settings (host, port, concurrency limits)
+- System prompt for the LLM
+- Storage directories for cache and vector store
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| HOST | Server hostname | 0.0.0.0 |
+| PORT | Server port | 8000 |
+| DEBUG | Enable debug mode | False |
+| MAX_CONCURRENT_USERS | Maximum concurrent users | 30 |
+| QUEUE_TIMEOUT | Queue timeout in seconds | 300 |
+| REQUEST_TIMEOUT | Request timeout in seconds | 120 |
+| CURRENT_LLM | URL to LLM model | Qwen2.5-3B-Instruct GGUF |
+| CURRENT_EMBED | Embedding model name | BAAI/bge-m3 |
+| NUM_THREADS | Number of threads for LLM inference | 4 |
+| TEMPERATURE | Temperature for LLM responses | 0.2 |
+| LOG_LEVEL | Logging level | INFO |
+
+## Models
+
+The application supports multiple models:
+
+### Chat Models (smallest to largest):
+- Qwen 2.5 3B (Default) - ~2GB download
+- Qwen 2.5 7B - ~5GB download
+- Qwen 2.5 14B - ~9GB download
+
+### Embedding Models:
+- BGE-M3 (Default)
+- GTE-Small
+
+## Requirements
+
+- Python 3.8+
+- Required Python packages:
+    llama-index-core>=0.10.0
+    llama-index-llms-llama-cpp>=0.1.0
+    llama-index-embeddings-huggingface>=0.1.0
+    llama-index-vector-stores-chroma>=0.1.0
+    chromadb>=0.4.13
+    feedparser>=6.0.0
+    chardet>=5.0.0
+    fastapi>=0.104.0
+    uvicorn>=0.23.0
+    pydantic>=2.0.0
+    python-dotenv>=1.0.0
+    websockets>=11.0.0
+    psutil>=5.9.0  # Optional, for metrics collection
 
 ## Project Structure
 
 ```
 marxist-chat/
-├── src/                # Source code directory
-│   ├── api/            # API endpoints and WebSocket handlers
-│   │   ├── endpoints.py      # REST API endpoint implementations
-│   │   ├── exceptions.py     # Exception handlers
-│   │   ├── middleware.py     # Middleware for metrics
-│   │   ├── metrics_endpoint.py # Metrics API endpoints
-│   │   ├── router.py         # FastAPI router definitions
-│   │   └── websocket.py      # WebSocket handling logic
-│   ├── cli/            # Command-line interface components
-│   │   ├── handlers.py       # Menu option handlers
-│   │   └── menu.py           # CLI menu system
-│   ├── core/           # Core application functionality
-│   │   ├── feed_processor.py # RSS feed processing
-│   │   ├── llm_manager.py    # LLM model management
-│   │   ├── query_engine.py   # RAG query processing
-│   │   └── vector_store.py   # Vector database management
+├── src/                # Core source code
+│   ├── api/            # API and WebSocket endpoints
+│   ├── cli/            # Command-line interface
+│   ├── core/           # Core application logic
+│   │   ├── feed_processor.py    # RSS feed handling
+│   │   ├── llm_manager.py       # LLM initialization and management
+│   │   ├── metadata_repository.py # Metadata indexing and retrieval
+│   │   ├── query_engine.py      # RAG query processing
+│   │   └── vector_store.py      # Vector database operations
 │   ├── utils/          # Utility functions
-│   │   ├── file_utils.py     # File management utilities
-│   │   ├── logging_setup.py  # Logging configuration
-│   │   ├── metadata_utils.py # Metadata extraction helpers
-│   │   └── text_utils.py     # Text processing utilities
-│   ├── app.py          # FastAPI application entry point
-│   ├── config.py       # Application configuration
+│   ├── app.py          # FastAPI web server entry point
+│   ├── config.py       # Configuration management
 │   └── main.py         # CLI application entry point
-├── kubernetes/         # Kubernetes deployment files
-├── static/             # Static files for the web interface
-│   └── index.html      # Frontend client HTML
-├── posts_cache/        # Directory for cached RSS feed articles
-├── vector_store/       # Directory for vector database storage
+├── static/             # Web interface files
+├── kubernetes/         # Kubernetes deployment configs
+├── posts_cache/        # Cached RSS articles
+├── vector_store/       # Vector database files
 ├── logs/               # Application logs
-├── tests/              # Test directory
-├── examples/           # Example clients and usage
-├── Dockerfile          # Container definition
-├── docker-compose.yml  # Docker Compose for development
-└── requirements.txt    # Required Python packages
+└── .env                # Environment configuration
 ```
 
 ## Storage Directories
@@ -169,91 +225,216 @@ For production deployment with Kubernetes, refer to the [Kubernetes Deployment G
 
 ## API Endpoints
 
-### Health and Status
+### REST API Endpoints
 
-- `GET /api/v1/healthcheck` - Check if the API is running
-- `GET /api/v1/status` - Get system status information
+#### Health and Status
 
-### Queue Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/healthcheck` | GET | Simple health check |
+| `/api/v1/status` | GET | System status with connection counts |
+| `/api/v1/metrics` | GET | Detailed system metrics |
+| `/api/v1/metrics/summary` | GET | Simplified metrics summary |
 
-- `GET /api/v1/queue` - Get detailed queue status
-- `POST /api/v1/queue/clear` - Admin endpoint to clear the waiting queue
+#### Content Management
 
-### Archive and Vector Store Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/archive-rss` | POST | Download and process RSS feeds |
+| `/api/v1/create-vector-store` | POST | Create vector store from archived documents |
+| `/api/v1/feed-stats` | GET | Statistics about archived feeds |
+| `/api/v1/vector-store-stats` | GET | Statistics about the vector store |
 
-- `POST /api/v1/archive-rss` - Archive RSS feeds
-- `POST /api/v1/create-vector-store` - Create vector store from archived documents
-- `GET /api/v1/feed-stats` - Get feed statistics
-- `GET /api/v1/vector-store-stats` - Get vector store statistics
+#### Document Access
 
-### Document Access
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/documents/{document_id}` | GET | Get a specific document by ID |
+| `/api/v1/documents/search` | GET | Search for documents matching a query |
+| `/api/v1/model-info` | GET | Get information about the current LLM model |
 
-- `GET /api/v1/documents/{document_id}` - Get a specific document by ID
-- `GET /api/v1/documents/search` - Search for documents matching a query
+#### Query Processing
 
-### Model Information
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/query` | POST | Process a query and get response with sources |
+| `/api/v1/query/{user_id}/stop` | POST | Stop an in-progress query |
 
-- `GET /api/v1/model-info` - Get information about the current LLM model
+#### Queue Management
 
-### Query Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/queue` | GET | Get detailed queue status |
+| `/api/v1/queue/clear` | POST | Clear the waiting queue (admin) |
 
-- `POST /api/v1/query` - Process a query and get response with sources
-- `POST /api/v1/query/{user_id}/stop` - Stop an in-progress query
+#### System Management
 
-### Service Management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/service/restart` | POST | Restart service components (admin) |
+| `/api/v1/rebuild-metadata-index` | POST | Rebuild metadata index from cached documents |
 
-- `POST /api/v1/service/restart` - Admin endpoint to restart service components
+### WebSocket API
 
-### Metrics
+WebSocket connections provide real-time chat functionality with token-streaming for responsive interactions.
 
-- `GET /api/v1/metrics` - Get detailed system metrics
-- `GET /api/v1/metrics/summary` - Get a simplified metrics summary
+#### Connection Endpoints
 
-### WebSocket Endpoints
+| Endpoint | Description |
+|----------|-------------|
+| `/api/v1/ws/chat/{user_id}` | Connect with a specific user ID |
+| `/api/v1/ws/chat` | Connect with an auto-generated user ID |
 
-- `WebSocket /api/v1/ws/chat/{user_id}` - WebSocket endpoint for chat interface
-- `WebSocket /api/v1/ws/chat` - WebSocket endpoint with auto-generated ID
+#### Client-to-Server Messages
 
-For detailed API documentation, see [API.md](src/api/API.md).
+```json
+// Query message
+{
+  "message": "What is the communist position on healthcare?"
+}
 
-## Configuration
+// Stop query command
+{
+  "command": "stop_query"
+}
+```
 
-Edit `.env` or modify `src/config.py` to customize:
+#### Server-to-Client Messages
 
-- RSS feed URLs
-- Embedding and LLM models
-- Server settings (host, port, concurrency limits)
-- System prompt for the LLM
-- Storage directories for cache and vector store
+The server sends various message types during WebSocket communication:
 
-### Environment Variables
+1. **System Messages**: Connection status and informational messages
+   ```json
+   {
+     "type": "system",
+     "message": "Connected to chat service"
+   }
+   ```
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| HOST | Server hostname | 0.0.0.0 |
-| PORT | Server port | 8000 |
-| DEBUG | Enable debug mode | False |
-| MAX_CONCURRENT_USERS | Maximum concurrent users | 30 |
-| QUEUE_TIMEOUT | Queue timeout in seconds | 300 |
-| REQUEST_TIMEOUT | Request timeout in seconds | 120 |
-| CURRENT_LLM | URL to LLM model | Qwen2.5-3B-Instruct GGUF |
-| CURRENT_EMBED | Embedding model name | BAAI/bge-m3 |
-| NUM_THREADS | Number of threads for LLM inference | 4 |
-| TEMPERATURE | Temperature for LLM responses | 0.2 |
-| LOG_LEVEL | Logging level | INFO |
+2. **Queue Messages**: Position updates when in the waiting queue
+   ```json
+   {
+     "type": "queue",
+     "position": 3,
+     "message": "You are #3 in queue. Estimated wait time: ~6 minutes"
+   }
+   ```
 
-## Models
+3. **Stream Messages**: Token-by-token streaming responses
+   ```json
+   // Stream start
+   { "type": "stream_start" }
+   
+   // Individual tokens
+   { "type": "stream_token", "data": "token" }
+   
+   // Stream end with complete response
+   { "type": "stream_end", "data": "The complete response text..." }
+   ```
 
-The application supports multiple models:
+4. **Source Messages**: Citations for the response
+   ```json
+   {
+     "type": "sources",
+     "data": [
+       {
+         "title": "Healthcare as a Human Right",
+         "date": "2023-02-15",
+         "url": "https://communistusa.org/2023/02/healthcare-human-right",
+         "excerpt": "Access to healthcare is a fundamental human right..."
+       }
+     ]
+   }
+   ```
 
-### Chat Models (smallest to largest):
-- Qwen 2.5 3B (Default) - ~2GB download
-- Qwen 2.5 7B - ~5GB download
-- Qwen 2.5 14B - ~9GB download
+5. **Error Messages**: Error notifications
+   ```json
+   {
+     "type": "error",
+     "message": "An error occurred: Failed to process query"
+   }
+   ```
 
-### Embedding Models:
-- BGE-M3 (Default)
-- GTE-Small
+### WebSocket Implementation Example
+
+```javascript
+// Connect to WebSocket
+const socket = new WebSocket('ws://localhost:8000/api/v1/ws/chat');
+let responseText = '';
+
+// Handle messages
+socket.onmessage = function(event) {
+  const data = JSON.parse(event.data);
+  
+  switch(data.type) {
+    case 'stream_start':
+      responseText = '';
+      document.getElementById('response').innerHTML = '';
+      document.getElementById('stop-btn').classList.remove('hidden');
+      break;
+      
+    case 'stream_token':
+      responseText += data.data;
+      document.getElementById('response').innerHTML = responseText;
+      break;
+      
+    case 'stream_end':
+      document.getElementById('stop-btn').classList.add('hidden');
+      break;
+      
+    case 'sources':
+      // Display sources
+      const sourcesEl = document.getElementById('sources');
+      sourcesEl.innerHTML = '';
+      
+      data.data.forEach(source => {
+        sourcesEl.innerHTML += `
+          <div class="source">
+            <h4>${source.title} (${source.date})</h4>
+            <p>${source.excerpt}</p>
+            <a href="${source.url}" target="_blank">Read more</a>
+          </div>
+        `;
+      });
+      break;
+      
+    case 'error':
+      document.getElementById('response').innerHTML += 
+        `<div class="error">${data.message}</div>`;
+      break;
+  }
+};
+
+// Send a query
+function sendQuery(text) {
+  socket.send(JSON.stringify({ message: text }));
+}
+
+// Stop a running query
+function stopQuery() {
+  socket.send(JSON.stringify({ command: "stop_query" }));
+}
+```
+
+### Error Handling
+
+All API endpoints use standard HTTP status codes:
+
+- 200: Success
+- 400: Bad Request (invalid parameters)
+- 404: Not Found (resource doesn't exist)
+- 422: Validation Error (invalid input)
+- 500: Internal Server Error
+
+Error responses follow a consistent format:
+
+```json
+{
+  "status": "error",
+  "message": "Error message",
+  "details": {} // Optional additional details
+}
+```
 
 ## Web Interface
 
@@ -265,90 +446,6 @@ The application includes a simple web interface for interacting with the chatbot
 - Buttons for archiving RSS feeds and creating the vector store
 - Status checking capabilities
 - Source attribution for responses
-
-## Scalability
-
-The application supports three scaling methods:
-
-1. **Single Server**: Handles 20-30 concurrent users with queuing
-2. **Docker Compose**: Useful for development and single-machine deployment
-3. **Kubernetes**: For production deployment with horizontal scaling
-
-## WebSocket Message Format
-
-### Client to Server Messages
-
-**Query Message:**
-```json
-{
-  "message": "What is the communist position on healthcare?"
-}
-```
-
-**Stop Query Command:**
-```json
-{
-  "command": "stop_query"
-}
-```
-
-### Server to Client Messages
-
-**System Messages:**
-```json
-{
-  "type": "system",
-  "message": "Connected to chat service"
-}
-```
-
-**Queue Messages:**
-```json
-{
-  "type": "queue",
-  "position": 3,
-  "message": "You are #3 in queue. Estimated wait time: ~6 minutes"
-}
-```
-
-**Status Messages:**
-```json
-{
-  "type": "status",
-  "message": "Processing your query..."
-}
-```
-
-**Stream Messages:**
-```json
-{
-  "type": "stream_token",
-  "data": "token"
-}
-```
-
-**Query Stopped Messages:**
-```json
-{
-  "type": "query_stopped",
-  "message": "Query was stopped by user request."
-}
-```
-
-**Source Messages:**
-```json
-{
-  "type": "sources",
-  "data": [
-    {
-      "title": "Healthcare as a Human Right",
-      "date": "2023-02-15",
-      "url": "https://communistusa.org/2023/02/healthcare-human-right",
-      "excerpt": "Access to healthcare is a fundamental human right that should not be commodified..."
-    }
-  ]
-}
-```
 
 ## Customization
 

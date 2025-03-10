@@ -313,6 +313,7 @@ class QueryEngine:
                     date = complete_metadata.get('date', 'Unknown')
                     url = complete_metadata.get('url', 'No URL')
                     author = complete_metadata.get('author', 'Unknown')
+                    feed_name = complete_metadata.get('feed_name', 'Unknown')
                     
                     # Skip duplicate URLs
                     if url in seen_urls and url != 'No URL':
@@ -327,6 +328,7 @@ class QueryEngine:
                         "date": date,
                         "author": author,
                         "url": url,
+                        "feed_name": feed_name,
                         "excerpt": excerpt
                     })
                     
@@ -347,6 +349,7 @@ class QueryEngine:
                 date = node.metadata.get('date', 'Unknown')
                 url = node.metadata.get('url', 'No URL')
                 author = node.metadata.get('author', 'Unknown')
+                feed_name = node.metadata.get('feed_name', 'Unknown')
                 
                 # Then try to extract from node text if available
                 if hasattr(node, 'text') and node.text:
@@ -366,6 +369,10 @@ class QueryEngine:
                     url_match = re.search(r'URL: (.*?)\n', node.text)
                     if url_match:
                         url = url_match.group(1).strip() or url
+                        
+                    feed_match = re.search(r'Feed Source: (.*?)\n', node.text)
+                    if feed_match:
+                        feed_name = feed_match.group(1).strip() or feed_name
                 
                 # Skip documents with insufficient metadata
                 if title == 'Untitled' and url == 'No URL':
@@ -385,6 +392,7 @@ class QueryEngine:
                     "date": date, 
                     "author": author,
                     "url": url,
+                    "feed_name": feed_name,
                     "excerpt": excerpt
                 })
                 
@@ -409,6 +417,7 @@ class QueryEngine:
                         "date": "Unknown",
                         "author": "Unknown",
                         "url": "No URL",
+                        "feed_name": "Unknown",
                         "excerpt": excerpt
                     })
                 except Exception:
@@ -453,6 +462,7 @@ class QueryEngine:
                         date = complete_metadata.get('date', 'Unknown')
                         url = complete_metadata.get('url', 'No URL')
                         author = complete_metadata.get('author', 'Unknown')
+                        feed_name = complete_metadata.get('feed_name', 'Unknown')
                         
                         source_id = f"{title}:{date}:{url}"
                         
@@ -462,7 +472,7 @@ class QueryEngine:
                         seen_sources.add(source_id)
                         
                         # Format source information
-                        output.append(f"\n{source_counter}. {title}")
+                        output.append(f"\n{source_counter}. [{feed_name}] {title}")
                         output.append(f"   Date: {date}")
                         output.append(f"   Author: {author}")
                         output.append(f"   URL: {url}")
@@ -502,6 +512,7 @@ class QueryEngine:
                 date = metadata.get('Date') or node.metadata.get('date', 'Unknown')
                 url = metadata.get('URL') or node.metadata.get('url', 'No URL')
                 author = metadata.get('Author') or node.metadata.get('author', 'Unknown')
+                feed_name = metadata.get('Feed Source') or node.metadata.get('feed_name', 'Unknown')
                 
                 source_id = f"{title}:{date}:{url}"
                 
@@ -511,7 +522,7 @@ class QueryEngine:
                 seen_sources.add(source_id)
                 
                 # Format source information
-                output.append(f"\n{source_counter}. {title}")
+                output.append(f"\n{source_counter}. [{feed_name}] {title}")
                 output.append(f"   Date: {date}")
                 output.append(f"   Author: {author}")
                 output.append(f"   URL: {url}")

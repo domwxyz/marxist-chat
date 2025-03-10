@@ -23,6 +23,7 @@ class VectorStoreManager:
         self.chroma_client = None
         self.chroma_collection = None
         self.metadata_repository = MetadataRepository(self.cache_dir)
+        self.feed_processor = FeedProcessor()  # Used for feed directory name generation
     
     def _init_chroma_client(self):
         """Initialize ChromaDB client and collection"""
@@ -36,10 +37,29 @@ class VectorStoreManager:
         self.chroma_collection = self.chroma_client.get_or_create_collection("articles")
         
         return self.chroma_collection
+
+    def _get_all_document_paths(self):
+        """Get paths to all documents across all feed directories"""
+        all_paths = []
+        
+        # First check if there are any documents directly in the cache directory (old structure)
+        direct_files = list(self.cache_dir.glob("*.txt"))
+        if direct_files:
+            all_paths.extend(direct_files)
+            
+        # Then check all subdirectories (new structure)
+        for subdir in self.cache_dir.iterdir():
+            if subdir.is_dir():
+                subdir_files = list(subdir.glob("*.txt"))
+                all_paths.extend(subdir_files)
+                
+        return all_paths
     
     def create_vector_store(self, overwrite=False):
         """Create a new vector store from cached documents with improved metadata preservation"""
-        if not self.cache_dir.exists() or not any(self.cache_dir.iterdir()):
+        all_document_paths = self._get_all_document_paths()
+        
+        if not all_document_paths:
             print("\nError: No RSS archive found. Please archive RSS feed first.")
             return None
             
@@ -90,9 +110,9 @@ class VectorStoreManager:
             # Process all documents
             print("Loading documents...")
             all_documents = []
-            total_files = len(list(self.cache_dir.glob("*.txt")))
+            total_files = len(all_document_paths)
 
-            for i, file_path in enumerate(self.cache_dir.glob("*.txt"), 1):
+            for i, file_path in enumerate(all_document_paths, 1):
                 try:
                     if file_path.stat().st_size == 0:
                         continue
@@ -109,10 +129,19 @@ class VectorStoreManager:
                     # Ensure filename is in metadata
                     metadata['file_name'] = file_path.name
                     
+                    # Identify the source feed directory
+                    relative_path = file_path.relative_to(self.cache_dir)
+                    parts = relative_path.parts
+                    if len(parts) > 1:  # If file is in a subdirectory
+                        metadata['feed_name'] = parts[0]  # First part is the feed directory name
+                    else:
+                        metadata['feed_name'] = 'unknown'  # For files directly in cache dir
+                    
                     # Restructure the text to emphasize metadata
                     # This makes it more likely to be captured within each chunk
                     enhanced_text = f"Title: {metadata.get('title', 'Untitled')}\n"
                     enhanced_text += f"Author: {metadata.get('author', 'Unknown')}\n"
+                    enhanced_text += f"Feed Source: {metadata.get('feed_name', 'Unknown')}\n"
                     
                     if 'categories' in metadata:
                         enhanced_text += f"Categories: {metadata.get('categories', '')}\n"
@@ -169,7 +198,7 @@ class VectorStoreManager:
                         
                         # If we found the source document, copy its metadata
                         if source_doc and hasattr(source_doc, 'metadata'):
-                            for key in ['file_name', 'title', 'date', 'author', 'url', 'categories']:
+                            for key in ['file_name', 'title', 'date', 'author', 'url', 'categories', 'feed_name']:
                                 if key in source_doc.metadata and key not in node.metadata:
                                     node.metadata[key] = source_doc.metadata[key]
                         
@@ -262,34 +291,65 @@ class VectorStoreManager:
             return False
             
         try:
-            # Get the latest document date
-            latest_date = self.get_latest_document_date()
-            if not latest_date:
+            # Get the latest document date for each feed source
+            latest_dates = self.get_latest_document_dates_by_feed()
+            if not latest_dates:
                 print("\nNo existing documents found. You should create the vector store instead.")
                 return False
                 
-            print(f"\nLooking for documents newer than {latest_date}")
-            
             # Initialize FeedProcessor
             feed_processor = FeedProcessor()
+            feed_urls = config.RSS_FEED_URLS
             
-            # Fetch new entries since latest date
-            new_entries = feed_processor.fetch_new_entries(since_date=latest_date)
+            all_new_documents = []
             
-            if not new_entries:
-                print("\nNo new entries found in RSS feed.")
-                return True
+            # Process each feed individually to check for new content
+            for feed_url in feed_urls:
+                feed_dir_name = feed_processor._get_feed_directory_name(feed_url)
+                latest_date = latest_dates.get(feed_dir_name, None)
                 
-            print(f"\nFound {len(new_entries)} new entries. Processing...")
-            
-            # Process new entries and save them to cache
-            new_documents = feed_processor.process_entries(new_entries)
+                if latest_date:
+                    print(f"\nLooking for documents newer than {latest_date} from {feed_url}")
+                else:
+                    print(f"\nNo existing documents found for {feed_url}, will fetch all entries")
+                
+                # For each feed, fetch entries since its specific latest date
+                if latest_date:
+                    # Only fetch entries for this specific feed
+                    entries = []
+                    new_entries = feed_processor.fetch_new_entries(since_date=latest_date)
+                    
+                    # Filter entries to only include those from this feed
+                    for entry in new_entries:
+                        if entry.get('_feed_url') == feed_url:
+                            entries.append(entry)
+                else:
+                    # For feeds with no existing documents, fetch all entries
+                    entries = feed_processor.fetch_rss_entries(feed_url)
+                    # Add source feed information
+                    for entry in entries:
+                        entry['_feed_url'] = feed_url
+                
+                if not entries:
+                    print(f"\nNo new entries found in RSS feed: {feed_url}")
+                    continue
+                    
+                print(f"\nFound {len(entries)} new entries from {feed_url}. Processing...")
+                
+                # Process entries and save to respective feed directory
+                new_documents = feed_processor.process_entries(entries)
+                if new_documents:
+                    all_new_documents.extend(new_documents)
+                    print(f"\nSuccessfully processed {len(new_documents)} new documents from {feed_url}")
+                else:
+                    print(f"\nNo new documents were processed from {feed_url}")
 
-            if not new_documents:
-                print("\nNo new documents were processed.")
+            # If no new documents across all feeds, return early
+            if not all_new_documents:
+                print("\nNo new documents were processed from any feed.")
                 return True
                 
-            print(f"\nSuccessfully processed {len(new_documents)} new documents.")
+            print(f"\nTotal new documents across all feeds: {len(all_new_documents)}")
 
             # Load existing vector store
             index = self.load_vector_store()
@@ -298,7 +358,7 @@ class VectorStoreManager:
                 return False
 
             # Insert documents into the index
-            for doc in new_documents:
+            for doc in all_new_documents:
                 # Add document to index
                 nodes = index.insert(doc)
                 
@@ -311,7 +371,7 @@ class VectorStoreManager:
             print("\nUpdating metadata index...")
             self.metadata_repository.build_metadata_index(force_rebuild=True)
             
-            print(f"\nVector store successfully updated with {len(new_documents)} new documents!")
+            print(f"\nVector store successfully updated with {len(all_new_documents)} new documents!")
             return True
             
         except Exception as e:
@@ -322,19 +382,31 @@ class VectorStoreManager:
 
     def get_document_by_id(self, document_id: str):
         """Retrieve a document by ID (filename)"""
-        # In our implementation, document_id would be the filename
-        file_path = self.cache_dir / f"{document_id}.txt"
+        # Search in all feed directories for the document
+        all_document_paths = self._get_all_document_paths()
         
-        if not file_path.exists():
+        # Filter paths to find the document with matching ID
+        matching_paths = [p for p in all_document_paths if p.name.startswith(f"{document_id}.txt") or p.name.startswith(f"{document_id}_")]
+        
+        if not matching_paths:
             return None
             
         try:
+            file_path = matching_paths[0]
             with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 text = f.read()
                 
             # Extract metadata from text
             metadata = self._extract_metadata_from_text(text)
-            metadata["file_name"] = f"{document_id}.txt"
+            metadata["file_name"] = file_path.name
+            
+            # Add feed_name based on directory structure
+            relative_path = file_path.relative_to(self.cache_dir)
+            parts = relative_path.parts
+            if len(parts) > 1:  # If file is in a subdirectory
+                metadata['feed_name'] = parts[0]  # First part is the feed directory name
+            else:
+                metadata['feed_name'] = 'unknown'  # For files directly in cache dir
             
             return Document(text=text, metadata=metadata)
         except Exception as e:
@@ -398,6 +470,34 @@ class VectorStoreManager:
             return latest_entry.get('date')
         except (IndexError, KeyError):
             return None
+    
+    def get_latest_document_dates_by_feed(self):
+        """Get the latest document date for each feed source"""
+        # Ensure metadata repository is loaded
+        if not self.metadata_repository.is_loaded:
+            self.metadata_repository.load_metadata_index()
+            
+        if not self.metadata_repository.metadata_list:
+            return {}
+            
+        latest_dates = {}
+        
+        # Group metadata entries by feed name
+        feed_entries = {}
+        for entry in self.metadata_repository.metadata_list:
+            feed_name = entry.get('feed_name', 'unknown')
+            if feed_name not in feed_entries:
+                feed_entries[feed_name] = []
+            feed_entries[feed_name].append(entry)
+        
+        # Get latest date for each feed
+        for feed_name, entries in feed_entries.items():
+            # Sort entries by date (newest first)
+            sorted_entries = sorted(entries, key=lambda x: x.get('date', ''), reverse=True)
+            if sorted_entries:
+                latest_dates[feed_name] = sorted_entries[0].get('date')
+                
+        return latest_dates
 
     def _extract_metadata_from_text(self, text: str):
         """Extract metadata section from document text"""
@@ -415,7 +515,7 @@ class VectorStoreManager:
                     
             if in_metadata and ": " in line:
                 key, value = line.split(": ", 1)
-                metadata[key] = value
+                metadata[key.lower()] = value
                 
         return metadata
         
@@ -440,6 +540,7 @@ class VectorStoreManager:
                 return file_name
             
             # Try to find it in the text
+            import re
             file_match = re.search(r'File: (.*?)\n', node.text)
             if file_match:
                 return file_match.group(1).strip()
@@ -455,6 +556,29 @@ class VectorStoreManager:
         
         # No filename found
         return ''
+
+    def _extract_embedded_metadata(self, text):
+        """Extract metadata embedded in node text"""
+        metadata = {}
+        if not text:
+            return metadata
+            
+        lines = text.split('\n')
+        in_metadata = False
+        
+        for line in lines:
+            if line.strip() == "---":
+                if not in_metadata:
+                    in_metadata = True
+                    continue
+                else:
+                    break
+                    
+            if in_metadata and ": " in line:
+                key, value = line.split(": ", 1)
+                metadata[key.lower()] = value
+        
+        return metadata
 
     def _vector_store_loaded(self):
         """Check if vector store is loaded"""
@@ -484,3 +608,4 @@ class VectorStoreManager:
             import traceback
             print(traceback.format_exc())
             return None
+            

@@ -79,18 +79,43 @@ async def get_feed_stats() -> Dict[str, Any]:
     try:
         feed_processor = FeedProcessor()
         
-        # Count files in cache
-        import config
-        from pathlib import Path
-        
-        cache_dir = config.CACHE_DIR
-        file_count = len(list(cache_dir.glob("*.txt"))) if cache_dir.exists() else 0
-        
+        # Get organized stats by feed directory
         stats = {
-            "feed_count": len(feed_processor.feed_urls),
-            "document_count": file_count,
-            "feeds": feed_processor.feed_urls
+            "total_feeds": len(feed_processor.feed_urls),
+            "feeds": feed_processor.feed_urls,
+            "feeds_by_directory": {}
         }
+        
+        # Get the base cache directory
+        cache_dir = config.CACHE_DIR
+        
+        # Count files in the main cache directory (old structure)
+        if cache_dir.exists():
+            main_dir_files = len(list(cache_dir.glob("*.txt")))
+            if main_dir_files > 0:
+                stats["feeds_by_directory"]["main_directory"] = {
+                    "count": main_dir_files,
+                    "path": str(cache_dir)
+                }
+        
+        # Count files in each feed subdirectory (new structure)
+        total_documents = 0
+        for feed_url in feed_processor.feed_urls:
+            feed_dir_name = feed_processor._get_feed_directory_name(feed_url)
+            feed_dir = cache_dir / feed_dir_name
+            
+            if feed_dir.exists():
+                file_count = len(list(feed_dir.glob("*.txt")))
+                total_documents += file_count
+                
+                stats["feeds_by_directory"][feed_dir_name] = {
+                    "count": file_count,
+                    "feed_url": feed_url,
+                    "path": str(feed_dir)
+                }
+        
+        # Add total count
+        stats["total_documents"] = total_documents
         
         return stats
     except Exception as e:

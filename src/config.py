@@ -13,11 +13,15 @@ VECTOR_STORE_DIR = Path(os.getenv("VECTOR_STORE_DIR", PARENT_DIR / "vector_store
 LOG_DIR = Path(os.getenv("LOG_DIR", PARENT_DIR / "logs"))
 LOG_DIR.mkdir(exist_ok=True, parents=True)
 
-# RSS feed configuration
-DEFAULT_RSS_FEEDS = [
-    "https://communistusa.org/feed",
-    # Add more feeds here
+# RSS feed configuration with pagination types
+RSS_FEED_CONFIG = [
+    {"url": "https://communistusa.org/feed", "pagination_type": "wordpress"},
+    {"url": "https://marxist.com/index.php?format=feed", "pagination_type": "joomla", "limit_increment": 5},
+    # Add more feeds here with appropriate pagination_type and settings
 ]
+
+# For backwards compatibility
+DEFAULT_RSS_FEEDS = [feed["url"] for feed in RSS_FEED_CONFIG]
 RSS_FEED_URLS = os.getenv("RSS_FEED_URLS", "").split(",") if os.getenv("RSS_FEED_URLS") else DEFAULT_RSS_FEEDS
 
 # Embedding models

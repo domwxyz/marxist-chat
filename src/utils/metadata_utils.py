@@ -62,17 +62,41 @@ def sanitize_filename(title):
     return sanitized
 
 def format_date(date_str):
-    """Format RSS date string to YYYY-MM-DD"""
+    """Format RSS date string to YYYY-MM-DD with improved format handling"""
     if not date_str or date_str == 'Unknown Date':
         return datetime.now().strftime('%Y-%m-%d')
-        
-    try:
-        # RSS feeds typically use this format
-        dt = datetime.strptime(date_str, '%a, %d %b %Y %H:%M:%S %z')
-        return dt.strftime('%Y-%m-%d')
-    except Exception as e:
-        print(f"Warning: Could not parse date '{date_str}': {e}")
-        return datetime.now().strftime('%Y-%m-%d')
+    
+    # Try multiple date formats
+    date_formats = [
+        '%a, %d %b %Y %H:%M:%S %z',  # Standard RSS
+        '%a, %d %b %Y %H:%M:%S %Z',  # Variant with timezone name
+        '%Y-%m-%dT%H:%M:%S%z',       # ISO format with timezone
+        '%Y-%m-%dT%H:%M:%SZ',        # ISO format UTC
+        '%Y-%m-%d %H:%M:%S',         # Simple format
+        '%d %b %Y',                  # Short format
+        '%B %d, %Y'                  # Full month format
+    ]
+    
+    for fmt in date_formats:
+        try:
+            dt = datetime.strptime(date_str, fmt)
+            return dt.strftime('%Y-%m-%d')
+        except ValueError:
+            continue
+    
+    # Fallback to regex extraction if all formats fail
+    import re
+    date_match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', date_str)
+    if date_match:
+        year, month, day = date_match.groups()
+        try:
+            dt = datetime(int(year), int(month), int(day))
+            return dt.strftime('%Y-%m-%d')
+        except ValueError:
+            pass
+    
+    print(f"Warning: Could not parse date '{date_str}'")
+    return datetime.now().strftime('%Y-%m-%d')
 
 def format_metadata(metadata):
     """Format metadata into a text block"""

@@ -178,7 +178,21 @@ class VectorStoreManager:
                     # Apply consistent normalization for all text content
                     enhanced_text = unicodedata.normalize('NFKC', enhanced_text)
                     
-                    all_documents.append(Document(text=enhanced_text, metadata=metadata))
+                    standardized_metadata = {
+                        'title': metadata.get('title', 'Untitled'),
+                        'date': metadata.get('date', datetime.now().strftime('%Y-%m-%d')),
+                        'author': metadata.get('author', 'Unknown Author'),
+                        'url': metadata.get('url', 'No URL'),
+                        'feed_name': metadata.get('feed_name', 'unknown'),
+                        'file_name': metadata.get('file_name', ''),
+                        'categories': ','.join(metadata.get('categories', [])),
+                        # Add additional fields for filtering
+                        'year': metadata.get('date', '').split('-')[0] if metadata.get('date') else '',
+                        'month': metadata.get('date', '').split('-')[1] if metadata.get('date') else '',
+                        'has_categories': len(metadata.get('categories', [])) > 0
+                    }
+
+                    all_documents.append(Document(text=enhanced_text, metadata=standardized_metadata))
                     
                     if i % 100 == 0:
                         print(f"Loaded {i}/{total_files} documents...")

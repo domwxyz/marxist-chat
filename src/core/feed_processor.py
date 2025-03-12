@@ -303,22 +303,54 @@ class FeedProcessor:
         return all_entries
     
     def extract_metadata_from_entry(self, entry):
-        """Extract and format metadata from a feedparser entry - optimized version"""
-        # Extract basic metadata - avoid repeated dictionary lookups
-        title = entry.get('title', 'Untitled')
-        published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
-        author = entry.get('author', 'Unknown Author')
-        url = entry.get('link', 'No URL')
+        """Extract and format metadata with improved feed-specific handling"""
+        # Base metadata dictionary
+        metadata = {}
+        
+        # Extract feed source
         feed_url = entry.get('_feed_url', 'Unknown Feed')
+        is_joomla = 'marxist.com' in feed_url
         
-        # Format date only once
-        formatted_date = format_date(published_date)
+        # Title extraction (consistent across feeds)
+        metadata['title'] = entry.get('title', 'Untitled')
         
-        # Process categories more efficiently
+        # Date extraction and standardization
+        published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
+        metadata['date'] = format_date(published_date)
+        
+        # URL extraction (consistent across feeds)
+        metadata['url'] = entry.get('link', 'No URL')
+        
+        # Feed tracking
+        metadata['feed_url'] = feed_url
+        metadata['feed_name'] = self._get_feed_directory_name(feed_url)
+        
+        # Author extraction with feed-specific handling
+        if is_joomla:
+            # Joomla-specific author extraction logic
+            if hasattr(entry, 'dc_creator'):
+                metadata['author'] = getattr(entry, 'dc_creator', 'Unknown Author')
+            elif hasattr(entry, 'creator'):
+                metadata['author'] = getattr(entry, 'creator', 'Unknown Author')
+            elif hasattr(entry, 'author_detail') and hasattr(entry.author_detail, 'name'):
+                metadata['author'] = entry.author_detail.name
+            else:
+                metadata['author'] = entry.get('author', 'Unknown Author')
+        else:
+            # WordPress author extraction
+            metadata['author'] = entry.get('author', 'Unknown Author')
+        
+        # Extract and clean categories
+        metadata['categories'] = self._extract_categories(entry)
+        
+        return metadata
+
+    def _extract_categories(self, entry):
+        """Extract and clean categories with deduplication"""
         categories = []
-        category_set = set()  # Use a set to avoid duplicates more efficiently
+        category_set = set()  # For deduplication
         
-        # Process tags field (only if it exists)
+        # Process tags field
         if hasattr(entry, 'tags'):
             for tag in entry.tags:
                 # Handle dictionary-style tags
@@ -337,7 +369,7 @@ class FeedProcessor:
                         category_set.add(cleaned)
                         categories.append(cleaned)
         
-        # Process category field, handling both single and multiple categories
+        # Process category field
         if hasattr(entry, 'category'):
             # Handle string or list
             if isinstance(entry.category, str):
@@ -350,16 +382,14 @@ class FeedProcessor:
                     if cleaned and cleaned not in category_set:
                         categories.append(cleaned)
         
-        # Return metadata directly - more efficient than building dictionary incrementally
-        return {
-            "title": title,
-            "date": formatted_date,
-            "author": author,
-            "url": url,
-            "feed_url": feed_url,
-            "feed_name": self._get_feed_directory_name(feed_url),
-            "categories": categories
-        }
+        # Additional category formats for Joomla
+        if hasattr(entry, 'categories'):
+            for cat in entry.categories:
+                cleaned = clean_category(cat)
+                if cleaned and cleaned not in category_set:
+                    categories.append(cleaned)
+        
+        return categories
     
     def extract_content_sections(self, entry):
         """Extract and clean the description and main content - optimized version"""

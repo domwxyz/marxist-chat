@@ -17,6 +17,7 @@ LOG_DIR.mkdir(exist_ok=True, parents=True)
 RSS_FEED_CONFIG = [
     {"url": "https://communistusa.org/feed", "pagination_type": "wordpress"},
     {"url": "https://marxist.com/index.php?format=feed", "pagination_type": "joomla", "limit_increment": 5},
+    {"url": "https://communist.red/feed", "pagination_type": "wordpress"}, 
     # Add more feeds here with appropriate pagination_type and settings
 ]
 

@@ -81,12 +81,14 @@ class MenuHandlers:
     
     @staticmethod
     def handle_load_chat(query_engine):
-        """Start the chat interface with streaming support"""
+        """Start the chat interface with streaming support and date filtering"""
         if not query_engine:
             print("\nError: No query engine loaded. Please run option 3 first.")
             return
-            
+                
         print("\nStarting chat interface. Type 'exit' to return to menu.")
+        print("For date filtering, use format: --from=YYYY-MM-DD --to=YYYY-MM-DD after your query.")
+        
         while True:
             query = input("\nQuestion: ").strip()
             if not query:
@@ -94,9 +96,28 @@ class MenuHandlers:
             if query.lower() == 'exit':
                 break
                 
+            # Parse date filters from query if present
+            start_date = None
+            end_date = None
+            
+            from_match = re.search(r'--from=(\d{4}-\d{2}-\d{2})', query)
+            if from_match:
+                start_date = from_match.group(1)
+                # Remove filter from query text
+                query = re.sub(r'--from=\d{4}-\d{2}-\d{2}', '', query).strip()
+                
+            to_match = re.search(r'--to=(\d{4}-\d{2}-\d{2})', query)
+            if to_match:
+                end_date = to_match.group(1)
+                # Remove filter from query text
+                query = re.sub(r'--to=\d{4}-\d{2}-\d{2}', '', query).strip()
+            
+            if start_date or end_date:
+                print(f"Filtering documents between {start_date or 'earliest'} and {end_date or 'latest'}")
+                
             try:
                 # The query method now handles streaming responses and prints tokens
-                response = query_engine.query(query)
+                response = query_engine.query(query, start_date=start_date, end_date=end_date)
                 print()  # Add a newline after streaming completes
                 
                 # Format the sources

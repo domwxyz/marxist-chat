@@ -1,6 +1,6 @@
 import logging
 from fastapi import HTTPException, Request
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from core.feed_processor import FeedProcessor
 from core.vector_store import VectorStoreManager
@@ -56,14 +56,14 @@ async def create_vector_store(overwrite: bool = False) -> Dict[str, str]:
         logger.error(f"Error creating vector store: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def process_query(query_text: str) -> Dict[str, Any]:
-    """Process a text query and return the response with sources"""
+async def process_query(query_text: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+    """Process a text query with optional date filters and return the response with sources"""
     try:
         if not query_text:
             raise HTTPException(status_code=400, detail="Query text is required")
             
         query_engine = await get_query_engine()
-        response = query_engine.query(query_text)
+        response = query_engine.query(query_text, start_date=start_date, end_date=end_date)
         sources = query_engine.get_formatted_sources()
         
         return {

@@ -92,10 +92,12 @@ async def api_model_info():
 # Query endpoints
 @router.post("/query")
 async def api_query(request: Request):
-    """Process a query"""
+    """Process a query with optional date filters"""
     data = await request.json()
     query_text = data.get("query")
-    return await process_query(query_text)
+    start_date = data.get("start_date")
+    end_date = data.get("end_date")
+    return await process_query(query_text, start_date=start_date, end_date=end_date)
 
 # Service management
 @router.post("/service/restart")

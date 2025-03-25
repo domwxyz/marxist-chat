@@ -146,9 +146,11 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                 })
                 continue
             
-            # Get the message text
+            # Get the message text and filter params
             query_text = message_data.get("message", "").strip()
             command = message_data.get("command", "")
+            start_date = message_data.get("start_date", None)
+            end_date = message_data.get("end_date", None)
 
             # Handle stop query command
             if command == "stop_query":
@@ -194,14 +196,24 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     try:
                         # Create a streaming task that uses the stream_query method directly
                         stream_task = asyncio.create_task(
-                            query_engine.stream_query(query_text, stop_event).__anext__()
+                            query_engine.stream_query(
+                                query_text, 
+                                stop_event, 
+                                start_date=start_date, 
+                                end_date=end_date
+                            ).__anext__()
                         )
                         active_queries[user_id] = stream_task
                         
                         # Stream tokens to the client in real-time
                         full_response = ""
                         
-                        async for token in query_engine.stream_query(query_text, stop_event):
+                        async for token in query_engine.stream_query(
+                            query_text, 
+                            stop_event, 
+                            start_date=start_date, 
+                            end_date=end_date
+                        ):
                             # Check if the query was stopped
                             if stop_event.is_set():
                                 # Send a message indicating the query was stopped
@@ -219,8 +231,6 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                                 "type": "stream_token",
                                 "data": token
                             })
-                            
-                            # No need for artificial delay - let the network handle it
                         
                     except asyncio.TimeoutError:
                         logger.warning(f"Query timeout for user {user_id}")

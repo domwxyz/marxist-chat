@@ -1,6 +1,9 @@
 import asyncio
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
+from types import SimpleNamespace
+import html
 import logging
+import re
 import traceback
 
 from llama_index.core import PromptTemplate, Settings
@@ -113,7 +116,6 @@ class QueryEngine:
                 metadata_context = self.metadata_repository.get_formatted_context()
                 
                 # Use direct LLM query with metadata context as fallback
-                from llama_index.core import Settings
                 fallback_prompt = (
                     f"Based on the following document index, please provide information about: {query_text}\n\n"
                     f"{metadata_context}\n\n"
@@ -124,7 +126,6 @@ class QueryEngine:
                 response_text = direct_response.text if hasattr(direct_response, 'text') else str(direct_response)
             
             # Create a response-like object that has the .response attribute for compatibility
-            from types import SimpleNamespace
             response_obj = SimpleNamespace()
             response_obj.response = response_text
             response_obj.source_nodes = self.last_sources
@@ -249,7 +250,6 @@ class QueryEngine:
                     excerpt = excerpt.strip()
                     
                     # Clean HTML entities in the excerpt
-                    import html
                     excerpt = html.unescape(excerpt)
                     
                     # Limit excerpt length and ensure it doesn't end with an incomplete word
@@ -290,9 +290,6 @@ class QueryEngine:
         if not self.last_sources:
             logger.warning("No source nodes available")
             return formatted_sources
-        
-        # Add import for regex at the top of file if needed
-        import re
             
         for node in self.last_sources:
             try:
@@ -539,7 +536,6 @@ class QueryEngine:
                     break
                     
             except Exception as e:
-                import traceback
                 print(f"Error formatting source: {str(e)}")
                 print(traceback.format_exc())
                 continue
@@ -590,7 +586,6 @@ class QueryEngine:
                 return file_name
             
             # Try to find it in the text
-            import re
             file_match = re.search(r'File: (.*?)\n', node.text)
             if file_match:
                 return file_match.group(1).strip()
@@ -633,7 +628,6 @@ class QueryEngine:
     def test_llm(self):
         """Test if the LLM is functioning properly"""
         try:
-            from llama_index.core import Settings
             test_prompt = "Generate a short response about communism in 1-2 sentences."
             print(f"DEBUG: Sending test prompt directly to LLM: {test_prompt}")
             response = Settings.llm.complete(test_prompt)
@@ -641,7 +635,6 @@ class QueryEngine:
             return f"LLM Test Result: {response}"
         except Exception as e:
             print(f"ERROR: LLM test failed: {e}")
-            import traceback
             print(traceback.format_exc())
             return f"LLM Test Error: {str(e)}"
         

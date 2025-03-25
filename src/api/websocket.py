@@ -192,9 +192,9 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     
                     # Process the query with streaming
                     logger.info(f"Processing query with streaming: {query_text[:100]}...")
-                    
+
                     try:
-                        # Create a streaming task that uses the stream_query method directly
+                        # Create a streaming task that uses the stream_query method directly with date filters
                         stream_task = asyncio.create_task(
                             query_engine.stream_query(
                                 query_text, 

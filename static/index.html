@@ -278,6 +278,70 @@
                 transform: translateY(-5px);
             }
         }
+        
+        /* Date filter styles */
+        .date-filters {
+            margin-bottom: 10px;
+        }
+        
+        .date-filter-toggle {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background-color: #f5f5f5;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: #555;
+        }
+        
+        .date-filter-toggle:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .date-filter-inputs {
+            display: none;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        
+        .date-filter-inputs.active {
+            display: block;
+        }
+        
+        .date-filter-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .date-filter-row label {
+            width: 80px;
+            margin-right: 10px;
+        }
+        
+        .date-filter-row input[type="date"] {
+            flex-grow: 1;
+            padding: 6px;
+            border: 1px solid var(--divider);
+            border-radius: 4px;
+        }
+        
+        .date-filter-row button {
+            margin-left: 10px;
+            padding: 6px 10px;
+            border-radius: 4px;
+            background-color: #f0f0f0;
+            color: #333;
+            font-size: 12px;
+        }
+        
+        .date-filter-row button:hover {
+            background-color: #e0e0e0;
+        }
     </style>
 </head>
 <body>
@@ -321,6 +385,25 @@
                     <span></span>
                 </div>
 
+                <div class="date-filters">
+                    <div class="date-filter-toggle" id="date-filter-toggle">
+                        <span>Date Filters</span>
+                        <span id="filter-arrow">▼</span>
+                    </div>
+                    <div class="date-filter-inputs" id="date-filter-inputs">
+                        <div class="date-filter-row">
+                            <label for="from-date">From date:</label>
+                            <input type="date" id="from-date">
+                            <button id="clear-from-date">Clear</button>
+                        </div>
+                        <div class="date-filter-row">
+                            <label for="to-date">To date:</label>
+                            <input type="date" id="to-date">
+                            <button id="clear-to-date">Clear</button>
+                        </div>
+                    </div>
+                </div>
+                
                 <div class="chat-input">
                     <input type="text" id="message-input" placeholder="Type your question here..." disabled>
                     <button id="send-btn" disabled>Send</button>
@@ -346,6 +429,14 @@
             const statusBtn = document.getElementById('status-btn');
             const statusDetails = document.getElementById('status-details');
             const typingIndicator = document.getElementById('typing-indicator');
+            
+            // Date filter elements
+            const dateFilterToggle = document.getElementById('date-filter-toggle');
+            const dateFilterInputs = document.getElementById('date-filter-inputs');
+            const fromDateInput = document.getElementById('from-date');
+            const toDateInput = document.getElementById('to-date');
+            const clearFromDateBtn = document.getElementById('clear-from-date');
+            const clearToDateBtn = document.getElementById('clear-to-date');
 
             // WebSocket connection
             let socket;
@@ -393,6 +484,24 @@
             // Check Status
             statusBtn.addEventListener('click', function() {
                 checkStatus();
+            });
+            
+            // Date filter toggle
+            dateFilterToggle.addEventListener('click', function() {
+                dateFilterInputs.classList.toggle('active');
+                document.getElementById('filter-arrow').textContent = 
+                    dateFilterInputs.classList.contains('active') ? '▲' : '▼';
+            });
+            
+            // Clear date filters
+            clearFromDateBtn.addEventListener('click', function() {
+                fromDateInput.value = '';
+                addSystemMessage('From date filter cleared');
+            });
+            
+            clearToDateBtn.addEventListener('click', function() {
+                toDateInput.value = '';
+                addSystemMessage('To date filter cleared');
             });
 
             // Connect to WebSocket
@@ -453,12 +562,27 @@
             function sendMessage() {
                 const message = messageInput.value.trim();
                 if (message && socket && socket.readyState === WebSocket.OPEN) {
-                    // Add user message to chat
-                    addUserMessage(message);
+                    // Get date filter values
+                    const fromDate = fromDateInput.value || null;
+                    const toDate = toDateInput.value || null;
                     
-                    // Send message to server
+                    // Add filter information to displayed message if filters are active
+                    let displayMessage = message;
+                    if (fromDate || toDate) {
+                        displayMessage += "\n[Filters: ";
+                        if (fromDate) displayMessage += `From: ${fromDate} `;
+                        if (toDate) displayMessage += `To: ${toDate}`;
+                        displayMessage += "]";
+                    }
+                    
+                    // Add user message to chat
+                    addUserMessage(displayMessage);
+                    
+                    // Send message to server with date parameters
                     socket.send(JSON.stringify({
-                        message: message
+                        message: message,
+                        start_date: fromDate,
+                        end_date: toDate
                     }));
                     
                     // Clear input

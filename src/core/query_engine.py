@@ -78,7 +78,7 @@ class QueryEngine:
             logger.error(traceback.format_exc())
             return False
     
-    def query(self, query_text: str):
+    def query(self, query_text: str, start_date=None, end_date=None):
         """Process a query with streaming and return the collected response"""
         if not self.query_engine:
             raise ValueError("Query engine not initialized. Call initialize() first.")
@@ -138,7 +138,7 @@ class QueryEngine:
             print(f"ERROR: {str(e)}")
             raise
     
-    async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None) -> AsyncGenerator[str, None]:
+    async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None, start_date=None, end_date=None) -> AsyncGenerator[str, None]:
         """Process a query and stream the response tokens asynchronously with stop capability"""
         if not self.query_engine:
             raise ValueError("Query engine not initialized. Call initialize() first.")

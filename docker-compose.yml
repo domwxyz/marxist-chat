@@ -3,15 +3,16 @@ version: '3.8'
 services:
   marxist-chat:
     build:
-      context: ./app
+      context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./data/posts_cache:/app/posts_cache
-      - ./data/vector_store:/app/vector_store
-      - ./data/logs:/app/logs
+      - /mnt/marxist-chat-data/data/posts_cache:/app/posts_cache
+      - /mnt/marxist-chat-data/data/vector_store:/app/vector_store
+      - /mnt/marxist-chat-data/data/logs:/app/logs
+      - /mnt/marxist-chat-data/models:/app/models
     env_file:
       - .env
     deploy:
@@ -38,15 +39,15 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./nginx/ssl:/etc/nginx/ssl
-      - ./app/static:/usr/share/nginx/html/static
+      - ./static:/usr/share/nginx/html/static
+      - ./letsencrypt:/etc/letsencrypt
     depends_on:
       - marxist-chat
 
-volumes:
-  posts_cache:
-    driver: local
-  vector_store:
-    driver: local
-  logs:
-    driver: local
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 86400  # Check for updates once a day
+    restart: unless-stopped
     

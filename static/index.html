@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Marxist Chat Client</title>
+    <title>Marxist Chat</title>
     <style>
         :root {
             --primary: #db1e1e;
@@ -26,12 +26,11 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 900px;
             margin: 0 auto;
             padding: 20px;
-            display: grid;
-            grid-template-columns: 300px 1fr;
-            grid-gap: 20px;
+            display: flex;
+            flex-direction: column;
             height: 100vh;
         }
 
@@ -40,7 +39,7 @@
             color: var(--text-on-primary);
             padding: 20px;
             text-align: center;
-            grid-column: 1 / span 2;
+            border-radius: 8px 8px 0 0;
         }
 
         h1 {
@@ -48,28 +47,15 @@
             font-size: 24px;
         }
 
-        .sidebar {
-            padding: 20px;
-            background-color: var(--surface);
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-        }
-
-        .main {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 40px);
-        }
-
         .chat-container {
             flex-grow: 1;
             padding: 20px;
             background-color: var(--surface);
-            border-radius: 8px;
+            border-radius: 0 0 8px 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             display: flex;
             flex-direction: column;
-            max-height: calc(100vh - 200px);
+            max-height: calc(100vh - 140px);
         }
 
         .chat-messages {
@@ -201,44 +187,6 @@
             background-color: #ff9800;
         }
 
-        .actions {
-            margin-top: 20px;
-        }
-
-        .action-button {
-            display: block;
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 10px;
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: background-color 0.3s;
-            text-align: center;
-        }
-
-        .action-button:hover {
-            background-color: var(--primary-dark);
-        }
-
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
         .hidden {
             display: none;
         }
@@ -279,180 +227,88 @@
             }
         }
         
-        /* Date filter styles */
-        .date-filters {
-            margin-bottom: 10px;
-        }
-        
-        .date-filter-toggle {
+        .status-bar {
             display: flex;
             justify-content: space-between;
+            background-color: #f0f0f0;
             padding: 8px 12px;
-            background-color: #f5f5f5;
             border-radius: 4px;
-            cursor: pointer;
-            margin-bottom: 5px;
+            margin-bottom: 10px;
             font-size: 14px;
             color: #555;
         }
-        
-        .date-filter-toggle:hover {
-            background-color: #e0e0e0;
-        }
-        
-        .date-filter-inputs {
-            display: none;
-            padding: 10px;
-            background-color: #f9f9f9;
-            border-radius: 4px;
-            margin-bottom: 10px;
-        }
-        
-        .date-filter-inputs.active {
-            display: block;
-        }
-        
-        .date-filter-row {
+
+        .connection-status {
             display: flex;
             align-items: center;
-            margin-bottom: 5px;
         }
         
-        .date-filter-row label {
-            width: 80px;
-            margin-right: 10px;
-        }
-        
-        .date-filter-row input[type="date"] {
-            flex-grow: 1;
-            padding: 6px;
-            border: 1px solid var(--divider);
-            border-radius: 4px;
-        }
-        
-        .date-filter-row button {
-            margin-left: 10px;
-            padding: 6px 10px;
-            border-radius: 4px;
-            background-color: #f0f0f0;
-            color: #333;
+        /* Footer style */
+        footer {
+            text-align: center;
+            padding: 10px;
             font-size: 12px;
-        }
-        
-        .date-filter-row button:hover {
-            background-color: #e0e0e0;
+            color: #666;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Marxist Chat Client</h1>
+            <h1>Marxist Chat</h1>
         </header>
 
-        <div class="sidebar">
-            <h2>Status</h2>
-            <p>
-                <span class="status-indicator status-offline" id="status-indicator"></span>
-                <span id="status-text">Disconnected</span>
-            </p>
-
-            <div class="actions">
-                <button class="action-button" id="connect-btn">Connect</button>
-                <button class="action-button" id="archive-rss-btn">Archive RSS Feed</button>
-                <button class="action-button" id="create-vector-btn">Create Vector Store</button>
-                <button class="action-button" id="status-btn">Check Status</button>
-                <button class="action-button" id="disconnect-btn" disabled>Disconnect</button>
+        <div class="chat-container">
+            <div class="status-bar">
+                <div class="connection-status">
+                    <span class="status-indicator status-offline" id="status-indicator"></span>
+                    <span id="status-text">Ready</span>
+                </div>
+            </div>
+            
+            <div class="chat-messages" id="chat-messages">
+                <div class="system-message">
+                    Welcome to Marxist Chat. Ask questions about Marxist theory and communist principles.
+                </div>
+            </div>
+            
+            <div class="typing-indicator hidden" id="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
             </div>
 
-            <div id="status-info" style="margin-top: 20px; font-size: 14px;">
-                <h3>System Status</h3>
-                <div id="status-details">Not connected</div>
-            </div>
-        </div>
-
-        <div class="main">
-            <div class="chat-container">
-                <div class="chat-messages" id="chat-messages">
-                    <div class="system-message">
-                        Welcome to Marxist Chat. Connect to start chatting.
-                    </div>
-                </div>
-                
-                <div class="typing-indicator hidden" id="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                </div>
-
-                <div class="date-filters">
-                    <div class="date-filter-toggle" id="date-filter-toggle">
-                        <span>Date Filters</span>
-                        <span id="filter-arrow">▼</span>
-                    </div>
-                    <div class="date-filter-inputs" id="date-filter-inputs">
-                        <div class="date-filter-row">
-                            <label for="from-date">From date:</label>
-                            <input type="date" id="from-date">
-                            <button id="clear-from-date">Clear</button>
-                        </div>
-                        <div class="date-filter-row">
-                            <label for="to-date">To date:</label>
-                            <input type="date" id="to-date">
-                            <button id="clear-to-date">Clear</button>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="chat-input">
-                    <input type="text" id="message-input" placeholder="Type your question here..." disabled>
-                    <button id="send-btn" disabled>Send</button>
-                    <button id="stop-btn" class="hidden">Stop</button>
-                </div>
+            <div class="chat-input">
+                <input type="text" id="message-input" placeholder="Type your question here...">
+                <button id="send-btn">Send</button>
+                <button id="stop-btn" class="hidden">Stop</button>
             </div>
         </div>
+        
+        <footer>
+            Revolutionary Communists of America - Powered by RAG
+        </footer>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             // DOM Elements
-            const connectBtn = document.getElementById('connect-btn');
-            const disconnectBtn = document.getElementById('disconnect-btn');
             const sendBtn = document.getElementById('send-btn');
             const stopBtn = document.getElementById('stop-btn');
             const messageInput = document.getElementById('message-input');
             const chatMessages = document.getElementById('chat-messages');
             const statusIndicator = document.getElementById('status-indicator');
             const statusText = document.getElementById('status-text');
-            const archiveRssBtn = document.getElementById('archive-rss-btn');
-            const createVectorBtn = document.getElementById('create-vector-btn');
-            const statusBtn = document.getElementById('status-btn');
-            const statusDetails = document.getElementById('status-details');
             const typingIndicator = document.getElementById('typing-indicator');
-            
-            // Date filter elements
-            const dateFilterToggle = document.getElementById('date-filter-toggle');
-            const dateFilterInputs = document.getElementById('date-filter-inputs');
-            const fromDateInput = document.getElementById('from-date');
-            const toDateInput = document.getElementById('to-date');
-            const clearFromDateBtn = document.getElementById('clear-from-date');
-            const clearToDateBtn = document.getElementById('clear-to-date');
 
             // WebSocket connection
-            let socket;
+            let socket = null;
             let isStreaming = false;
             let streamingMessage = '';
             let currentStreamElement = null;
-
-            // Connect to WebSocket
-            connectBtn.addEventListener('click', function() {
-                connect();
-            });
-
-            // Disconnect from WebSocket
-            disconnectBtn.addEventListener('click', function() {
-                disconnect();
-            });
+            let connectionTimeout = null;
+            const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
             // Send message
             sendBtn.addEventListener('click', function() {
@@ -471,41 +327,18 @@
                 }
             });
 
-            // Archive RSS Feed
-            archiveRssBtn.addEventListener('click', function() {
-                archiveRss();
-            });
-
-            // Create Vector Store
-            createVectorBtn.addEventListener('click', function() {
-                createVectorStore();
-            });
-
-            // Check Status
-            statusBtn.addEventListener('click', function() {
-                checkStatus();
-            });
-            
-            // Date filter toggle
-            dateFilterToggle.addEventListener('click', function() {
-                dateFilterInputs.classList.toggle('active');
-                document.getElementById('filter-arrow').textContent = 
-                    dateFilterInputs.classList.contains('active') ? '▲' : '▼';
-            });
-            
-            // Clear date filters
-            clearFromDateBtn.addEventListener('click', function() {
-                fromDateInput.value = '';
-                addSystemMessage('From date filter cleared');
-            });
-            
-            clearToDateBtn.addEventListener('click', function() {
-                toDateInput.value = '';
-                addSystemMessage('To date filter cleared');
-            });
+            // Ensure connected before sending
+            async function ensureConnected() {
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    return new Promise((resolve) => {
+                        connect(() => resolve());
+                    });
+                }
+                return Promise.resolve();
+            }
 
             // Connect to WebSocket
-            function connect() {
+            function connect(callback) {
                 // Set status to connecting
                 setStatus('connecting', 'Connecting...');
 
@@ -517,12 +350,17 @@
                 // Connection opened
                 socket.addEventListener('open', function(event) {
                     setStatus('online', 'Connected');
-                    enableChat(true);
-                    addSystemMessage('Connected to chat service');
+                    if (callback) callback();
+                    
+                    // Reset idle timeout
+                    resetConnectionTimeout();
                 });
 
                 // Listen for messages
                 socket.addEventListener('message', function(event) {
+                    // Reset timeout on each message
+                    resetConnectionTimeout();
+                    
                     const data = JSON.parse(event.data);
                     
                     // Process immediately
@@ -533,56 +371,47 @@
 
                 // Connection closed
                 socket.addEventListener('close', function(event) {
-                    setStatus('offline', 'Disconnected');
-                    enableChat(false);
-                    addSystemMessage('Disconnected from chat service');
+                    setStatus('offline', 'Ready');
                     isStreaming = false;
                     streamingMessage = '';
                     currentStreamElement = null;
                     hideTypingIndicator();
+                    clearTimeout(connectionTimeout);
                 });
 
                 // Connection error
                 socket.addEventListener('error', function(event) {
                     setStatus('offline', 'Connection Error');
-                    addSystemMessage('Error connecting to chat service');
-                    enableChat(false);
+                    addSystemMessage('Error connecting to chat service. Please try again.');
                 });
             }
 
-            // Disconnect from WebSocket
-            function disconnect() {
-                if (socket) {
-                    socket.close();
-                    stopBtn.classList.add('hidden');
-                }
+            // Reset connection timeout
+            function resetConnectionTimeout() {
+                clearTimeout(connectionTimeout);
+                connectionTimeout = setTimeout(() => {
+                    if (socket && socket.readyState === WebSocket.OPEN) {
+                        // Auto disconnect after idle time
+                        socket.close();
+                        addSystemMessage('Disconnected due to inactivity');
+                    }
+                }, IDLE_TIMEOUT);
             }
 
             // Send message
-            function sendMessage() {
+            async function sendMessage() {
                 const message = messageInput.value.trim();
-                if (message && socket && socket.readyState === WebSocket.OPEN) {
-                    // Get date filter values
-                    const fromDate = fromDateInput.value || null;
-                    const toDate = toDateInput.value || null;
-                    
-                    // Add filter information to displayed message if filters are active
-                    let displayMessage = message;
-                    if (fromDate || toDate) {
-                        displayMessage += "\n[Filters: ";
-                        if (fromDate) displayMessage += `From: ${fromDate} `;
-                        if (toDate) displayMessage += `To: ${toDate}`;
-                        displayMessage += "]";
-                    }
-                    
+                if (!message) return;
+                
+                await ensureConnected();
+                
+                if (socket && socket.readyState === WebSocket.OPEN) {
                     // Add user message to chat
-                    addUserMessage(displayMessage);
+                    addUserMessage(message);
                     
-                    // Send message to server with date parameters
+                    // Send message to server
                     socket.send(JSON.stringify({
-                        message: message,
-                        start_date: fromDate,
-                        end_date: toDate
+                        message: message
                     }));
                     
                     // Clear input
@@ -679,7 +508,6 @@
                     socket.send(JSON.stringify({
                         command: "stop_query"
                     }));
-                    console.log("Stop query command sent");
                 }
             }
 
@@ -767,67 +595,6 @@
             function setStatus(status, text) {
                 statusIndicator.className = `status-indicator status-${status}`;
                 statusText.textContent = text;
-                
-                connectBtn.disabled = status === 'online' || status === 'connecting';
-                disconnectBtn.disabled = status === 'offline';
-            }
-
-            // Enable/disable chat
-            function enableChat(enabled) {
-                messageInput.disabled = !enabled;
-                sendBtn.disabled = !enabled || isStreaming; // Disable during streaming
-            }
-
-            // Archive RSS Feed
-            function archiveRss() {
-                addSystemMessage('Archiving RSS Feed...');
-                
-                fetch('/api/v1/archive-rss', {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    addSystemMessage(`RSS Archive: ${data.message}`);
-                })
-                .catch(error => {
-                    addSystemMessage(`Error archiving RSS feed: ${error}`);
-                });
-            }
-
-            // Create Vector Store
-            function createVectorStore() {
-                addSystemMessage('Creating Vector Store (this may take a few minutes)...');
-                
-                fetch('/api/v1/create-vector-store', {
-                    method: 'POST'
-                })
-                .then(response => response.json())
-                .then(data => {
-                    addSystemMessage(`Vector Store: ${data.message}`);
-                })
-                .catch(error => {
-                    addSystemMessage(`Error creating vector store: ${error}`);
-                });
-            }
-
-            // Check Status
-            function checkStatus() {
-                fetch('/api/v1/status')
-                .then(response => response.json())
-                .then(data => {
-                    statusDetails.innerHTML = `
-                        <p>Active Connections: ${data.active_connections}</p>
-                        <p>Queue Length: ${data.queue_length}</p>
-                        <p>Max Concurrent Users: ${data.max_concurrent_users}</p>
-                        <p>Status: ${data.status}</p>
-                    `;
-                    
-                    addSystemMessage(`System status checked: ${data.status}, ${data.active_connections} active connections`);
-                })
-                .catch(error => {
-                    statusDetails.innerHTML = `<p>Error checking status: ${error}</p>`;
-                    addSystemMessage(`Error checking status: ${error}`);
-                });
             }
 
             // Show typing indicator

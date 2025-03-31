@@ -1,20 +1,52 @@
-version: '3'
+version: '3.8'
 
 services:
   marxist-chat:
-    build: .
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./posts_cache:/app/posts_cache
-      - ./vector_store:/app/vector_store
-      - ./logs:/app/logs
-    environment:
-      - DEBUG=False
-      - HOST=0.0.0.0
-      - PORT=8000
-      - MAX_CONCURRENT_USERS=30
-      - QUEUE_TIMEOUT=300
-      - REQUEST_TIMEOUT=120
+      - ./data/posts_cache:/app/posts_cache
+      - ./data/vector_store:/app/vector_store
+      - ./data/logs:/app/logs
+    env_file:
+      - .env
+    deploy:
+      resources:
+        limits:
+          cpus: '3.5'
+          memory: 7G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+  
+  nginx:
+    image: nginx:stable-alpine
     restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+      - ./app/static:/usr/share/nginx/html/static
+    depends_on:
+      - marxist-chat
+
+volumes:
+  posts_cache:
+    driver: local
+  vector_store:
+    driver: local
+  logs:
+    driver: local
     

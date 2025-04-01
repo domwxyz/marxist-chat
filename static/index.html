@@ -311,11 +311,14 @@
             let currentStreamElement = null;
             let connectionTimeout = null;
             let isWaitingForResponse = false; // Track if we're waiting for a response
+            let isConnecting = false;
             const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+            const CONNECTION_TIMEOUT = 10 * 1000; // 10 seconds
             
             // Force hide typing indicator on page load
             document.addEventListener('DOMContentLoaded', function() {
                 hideTypingIndicator();
+                setupUserActivityTracking();
             });
             
 
@@ -338,11 +341,69 @@
 
             // Ensure connected before sending
             async function ensureConnected() {
+                console.log("ensureConnected called, socket state:", socket ? socket.readyState : "no socket");
+                
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
-                    return new Promise((resolve) => {
-                        connect(() => resolve());
+                    console.log("Socket needs reconnection");
+                    return new Promise((resolve, reject) => {
+                        // If we're already in the process of connecting
+                        if (isConnecting) {
+                            console.log("Already connecting, waiting for completion");
+                            // Add an event listener that resolves once connection opens
+                            const onOpen = () => {
+                                console.log("Connection opened while waiting");
+                                socket.removeEventListener('open', onOpen);
+                                socket.removeEventListener('error', onError);
+                                clearTimeout(timeoutId);
+                                resolve();
+                            };
+                            
+                            const onError = (error) => {
+                                console.error("Connection error while waiting:", error);
+                                socket.removeEventListener('open', onOpen);
+                                socket.removeEventListener('error', onError);
+                                clearTimeout(timeoutId);
+                                reject(new Error("Connection failed"));
+                            };
+                            
+                            // Set timeout for connection
+                            const timeoutId = setTimeout(() => {
+                                console.error("Connection timeout while waiting");
+                                socket.removeEventListener('open', onOpen);
+                                socket.removeEventListener('error', onError);
+                                reject(new Error("Connection timeout"));
+                            }, CONNECTION_TIMEOUT);
+                            
+                            socket.addEventListener('open', onOpen);
+                            socket.addEventListener('error', onError);
+                        } else {
+                            // Start new connection process
+                            console.log("Starting new connection");
+                            isConnecting = true;
+                            
+                            // Create a connection with a callback for success/failure
+                            connect((success) => {
+                                console.log("Connection attempt completed, success:", success);
+                                isConnecting = false;
+                                if (success) {
+                                    resolve();
+                                } else {
+                                    reject(new Error("Failed to connect to server"));
+                                }
+                            });
+                            
+                            // Set timeout for the entire connection process
+                            setTimeout(() => {
+                                if (isConnecting) {
+                                    console.error("Timed out waiting for connection callback");
+                                    isConnecting = false;
+                                    reject(new Error("Connection timeout"));
+                                }
+                            }, CONNECTION_TIMEOUT);
+                        }
                     });
                 }
+                console.log("Socket is already open");
                 return Promise.resolve();
             }
 
@@ -350,51 +411,98 @@
             function connect(callback) {
                 // Set status to connecting
                 setStatus('connecting', 'Connecting...');
+                console.log("Starting connection process");
+
+                // Clear any existing socket to ensure a fresh connection
+                if (socket) {
+                    console.log("Cleaning up existing socket");
+                    try {
+                        socket.close();
+                    } catch (e) {
+                        console.error("Error closing existing socket:", e);
+                    }
+                    socket = null;
+                }
 
                 // Create WebSocket connection
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
                 const host = window.location.host || 'localhost:8000';
-                socket = new WebSocket(`${protocol}//${host}/api/v1/ws/chat`);
-
-                // Connection opened
-                socket.addEventListener('open', function(event) {
-                    setStatus('online', 'Connected');
-                    if (callback) callback();
+                const url = `${protocol}//${host}/api/v1/ws/chat`;
+                console.log("Connecting to:", url);
+                
+                try {
+                    socket = new WebSocket(url);
                     
-                    // Reset idle timeout
-                    resetConnectionTimeout();
-                });
-
-                // Listen for messages
-                socket.addEventListener('message', function(event) {
-                    // Reset timeout on each message
-                    resetConnectionTimeout();
-                    
-                    const data = JSON.parse(event.data);
-                    
-                    // Process immediately
-                    window.requestAnimationFrame(() => {
-                        handleMessage(data);
+                    // Connection opened
+                    socket.addEventListener('open', function(event) {
+                        console.log("WebSocket connection opened");
+                        setStatus('online', 'Connected');
+                        if (callback) callback(true); // Signal success
+                        
+                        // Reset idle timeout
+                        resetConnectionTimeout();
                     });
-                });
 
-                // Connection closed
-                socket.addEventListener('close', function(event) {
-                    setStatus('offline', 'Ready');
-                    isStreaming = false;
-                    isWaitingForResponse = false;
-                    streamingMessage = '';
-                    currentStreamElement = null;
-                    hideTypingIndicator();
-                    clearTimeout(connectionTimeout);
-                });
+                    // Listen for messages
+                    socket.addEventListener('message', function(event) {
+                        // Reset timeout on each message
+                        resetConnectionTimeout();
+                        
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            // Process immediately
+                            window.requestAnimationFrame(() => {
+                                handleMessage(data);
+                            });
+                        } catch (error) {
+                            console.error("Error parsing message:", error);
+                            addSystemMessage("Error processing server message");
+                        }
+                    });
 
-                // Connection error
-                socket.addEventListener('error', function(event) {
+                    // Connection closed
+                    socket.addEventListener('close', function(event) {
+                        console.log("WebSocket connection closed", event.code, event.reason);
+                        setStatus('offline', 'Disconnected');
+                        isStreaming = false;
+                        isWaitingForResponse = false;
+                        isConnecting = false;
+                        streamingMessage = '';
+                        currentStreamElement = null;
+                        hideTypingIndicator();
+                        clearTimeout(connectionTimeout);
+                        
+                        // Clear socket reference
+                        socket = null;
+                        
+                        // If unexpected closure, show message
+                        if (event.code !== 1000) {
+                            addSystemMessage('Connection closed. Will reconnect when you send a message.');
+                        }
+                    });
+
+                    // Connection error
+                    socket.addEventListener('error', function(event) {
+                        console.error("WebSocket error:", event);
+                        setStatus('offline', 'Connection Error');
+                        isConnecting = false;
+                        isWaitingForResponse = false;
+                        hideTypingIndicator();
+                        
+                        // Clear socket reference on error
+                        socket = null;
+                        
+                        if (callback) callback(false); // Signal failure
+                        
+                        addSystemMessage('Error connecting to chat service. Will try again when you send a message.');
+                    });
+                } catch (error) {
+                    console.error("Error creating WebSocket:", error);
+                    if (callback) callback(false);
                     setStatus('offline', 'Connection Error');
-                    isWaitingForResponse = false;
-                    addSystemMessage('Error connecting to chat service. Please try again.');
-                });
+                    addSystemMessage('Error creating WebSocket connection. Please try again later.');
+                }
             }
 
             // Reset connection timeout
@@ -404,9 +512,95 @@
                     if (socket && socket.readyState === WebSocket.OPEN) {
                         // Auto disconnect after idle time
                         socket.close();
+                        socket = null; // Clear the socket reference
                         addSystemMessage('Disconnected due to inactivity');
                     }
                 }, IDLE_TIMEOUT);
+            }
+
+            function createNewConnection(onSuccess, onError) {
+                // Set status to connecting
+                setStatus('connecting', 'Connecting...');
+                console.log("Creating new WebSocket connection");
+
+                // Create WebSocket connection
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const host = window.location.host || 'localhost:8000';
+                const url = `${protocol}//${host}/api/v1/ws/chat`;
+                console.log("Connecting to:", url);
+                
+                try {
+                    socket = new WebSocket(url);
+                    
+                    // Connection opened
+                    socket.addEventListener('open', function(event) {
+                        console.log("WebSocket connection opened successfully");
+                        setStatus('online', 'Connected');
+                        
+                        // Reset idle timeout
+                        resetConnectionTimeout();
+                        
+                        if (onSuccess) onSuccess();
+                    });
+
+                    // Listen for messages
+                    socket.addEventListener('message', function(event) {
+                        // Reset timeout on each message
+                        resetConnectionTimeout();
+                        
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            // Process immediately
+                            window.requestAnimationFrame(() => {
+                                handleMessage(data);
+                            });
+                        } catch (error) {
+                            console.error("Error parsing message:", error);
+                            addSystemMessage("Error processing server message");
+                        }
+                    });
+
+                    // Connection closed
+                    socket.addEventListener('close', function(event) {
+                        console.log("WebSocket connection closed", event.code, event.reason);
+                        setStatus('offline', 'Disconnected');
+                        isStreaming = false;
+                        isWaitingForResponse = false;
+                        streamingMessage = '';
+                        currentStreamElement = null;
+                        hideTypingIndicator();
+                        clearTimeout(connectionTimeout);
+                        
+                        // Very important: completely clear the socket reference
+                        socket = null;
+                        
+                        // Show message for unexpected closures
+                        if (event.code !== 1000 && event.code !== 1001) {
+                            addSystemMessage('Connection closed. Will reconnect when you send a message.');
+                        }
+                    });
+
+                    // Connection error
+                    socket.addEventListener('error', function(event) {
+                        console.error("WebSocket error occurred");
+                        setStatus('offline', 'Connection Error');
+                        isWaitingForResponse = false;
+                        hideTypingIndicator();
+                        
+                        // Clear socket reference on error - very important!
+                        socket = null;
+                        
+                        if (onError) onError(new Error("WebSocket connection error"));
+                        
+                        addSystemMessage('Error connecting to chat service. Will try again when you send a message.');
+                    });
+                } catch (error) {
+                    console.error("Error creating WebSocket:", error);
+                    if (onError) onError(error);
+                    setStatus('offline', 'Connection Error');
+                    addSystemMessage('Error creating WebSocket connection. Please try again later.');
+                }
             }
 
             // Send message
@@ -414,26 +608,76 @@
                 const message = messageInput.value.trim();
                 if (!message) return;
                 
-                await ensureConnected();
+                // Clear input early to prevent double-sending
+                const messageText = message;
+                messageInput.value = '';
                 
+                // Disable the send button during connection and sending
+                sendBtn.disabled = true;
+                
+                // Force a new connection if we're disconnected
+                if (!socket || socket.readyState !== WebSocket.OPEN) {
+                    console.log("Forcing new connection before sending message");
+                    // Clear any existing socket
+                    if (socket) {
+                        try {
+                            socket.close();
+                        } catch (e) {
+                            console.error("Error closing existing socket:", e);
+                        }
+                        socket = null;
+                    }
+                    
+                    // Create a new promise for the connection
+                    try {
+                        await new Promise((resolve, reject) => {
+                            const connectionTimeout = setTimeout(() => {
+                                reject(new Error("Connection timeout"));
+                            }, 10000); // 10 second timeout
+                            
+                            // Direct connection with callbacks
+                            createNewConnection(
+                                // Success callback
+                                () => {
+                                    clearTimeout(connectionTimeout);
+                                    resolve();
+                                },
+                                // Error callback
+                                (error) => {
+                                    clearTimeout(connectionTimeout);
+                                    reject(error || new Error("Connection failed"));
+                                }
+                            );
+                        });
+                    } catch (error) {
+                        console.error("Connection failed:", error);
+                        addSystemMessage(`Failed to connect: ${error.message}. Please try again.`);
+                        sendBtn.disabled = false;
+                        return;
+                    }
+                }
+                
+                // If we got here, we should have a valid connection
                 if (socket && socket.readyState === WebSocket.OPEN) {
                     // Add user message to chat
-                    addUserMessage(message);
+                    addUserMessage(messageText);
                     
                     // Send message to server
+                    console.log("Sending message to server");
                     socket.send(JSON.stringify({
-                        message: message
+                        message: messageText
                     }));
                     
-                    // Clear input
-                    messageInput.value = '';
-                    
-                    // Enable waiting state - the model is now "thinking"
+                    // Enable waiting state
                     isWaitingForResponse = true;
                     showTypingIndicator();
                     
-                    // Disable send button until response completes
-                    sendBtn.disabled = true;
+                    // Reset the connection timeout (prevents disconnection during activity)
+                    resetConnectionTimeout();
+                } else {
+                    console.error("Socket still not open after connection attempt");
+                    addSystemMessage("Connection issue. Please refresh the page and try again.");
+                    sendBtn.disabled = false;
                 }
             }
 
@@ -628,6 +872,21 @@
             function setStatus(status, text) {
                 statusIndicator.className = `status-indicator status-${status}`;
                 statusText.textContent = text;
+            }
+
+            function setupUserActivityTracking() {
+                // Reset timeout on user interaction
+                document.addEventListener('keydown', resetConnectionTimeout);
+                document.addEventListener('mousedown', resetConnectionTimeout);
+                document.addEventListener('touchstart', resetConnectionTimeout);
+                
+                // Focus events
+                window.addEventListener('focus', () => {
+                    // When window gets focus, check connection
+                    if (!socket || socket.readyState !== WebSocket.OPEN) {
+                        setStatus('offline', 'Ready');
+                    }
+                });
             }
 
             // Show typing indicator only when waiting for a response and not streaming

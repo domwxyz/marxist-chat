@@ -41,6 +41,16 @@
             text-align: center;
             border-radius: 8px 8px 0 0;
         }
+  
+        .header-content {
+            display: flex;
+            align-items: center;
+        }
+
+        .logo {
+            height: 40px;
+            margin-right: 15px;
+        }
 
         h1 {
             margin: 0;
@@ -257,7 +267,10 @@
 <body>
     <div class="container">
         <header>
-            <h1>Marxist Chat</h1>
+            <div class="header-content">
+                <img src="/static/images/logo.png" alt="Marxist Chat Logo" class="logo">
+                <h1>Marxist Chat</h1>
+            </div>
         </header>
 
         <div class="chat-container">

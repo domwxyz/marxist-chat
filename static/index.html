@@ -4,7 +4,50 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Marxist Chat</title>
-        <style>
+    <link rel="icon" href="./static/images/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="./static/images/favicon.ico" type="image/x-icon">
+    <link rel="preload" href="./static/fonts/built-titling.otf" as="font" type="font/otf" crossorigin>
+    <style>
+        @font-face {
+            font-family: 'Built Titling';
+            src: url('./static/fonts/built-titling.otf') format('opentype');
+            font-weight: normal;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        @font-face {
+            font-family: 'Built Titling';
+            src: url('./static/fonts/built-titling-bold.otf') format('opentype');
+            font-weight: bold;
+            font-style: normal;
+            font-display: swap;
+        }
+        
+        @font-face {
+            font-family: 'Cambria';
+            src: url('./static/fonts/cambria.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+            font-display: swap;
+        }
+        
+        @font-face {
+            font-family: 'Cambria';
+            src: url('./static/fonts/cambria-bold.ttf') format('truetype');
+            font-weight: bold;
+            font-style: normal;
+            font-display: swap;
+        }
+
+        @font-face {
+            font-family: 'Cambria';
+            src: url('./static/fonts/cambria-italic.ttf') format('truetype');
+            font-weight: normal;
+            font-style: italic;
+            font-display: swap;
+        }
+        
         :root {
             --primary: #db1e1e;
             --primary-light: #ee8181;
@@ -14,15 +57,21 @@
             --surface: #ffffff;
             --text: #212121;
             --divider: #e0e0e0;
+            --heading-font: 'Built Titling', serif;
+            --body-font: 'Cambria', Georgia, serif;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: var(--body-font);
             margin: 0;
             padding: 0;
             background-color: var(--background);
             color: var(--text);
             line-height: 1.6;
+        }
+
+        h1, h2, h3, h4, h5, h6 {
+            font-family: var(--heading-font);
         }
 
         .container {
@@ -55,6 +104,7 @@
         h1 {
             margin: 0;
             font-size: 24px;
+            font-family: var(--heading-font) !important;
         }
 
         .chat-container {
@@ -88,6 +138,7 @@
             border: 1px solid var(--divider);
             border-radius: 4px 0 0 4px;
             font-size: 16px;
+            font-family: var(--body-font);
         }
 
         button {
@@ -98,6 +149,7 @@
             border-radius: 0 4px 4px 0;
             cursor: pointer;
             font-size: 16px;
+            font-family: var(--heading-font) !important;
             transition: background-color 0.3s;
         }
 
@@ -118,6 +170,7 @@
             border-radius: 4px;
             cursor: pointer;
             font-size: 16px;
+            font-family: var(--heading-font) !important;
             margin-left: 10px;
             transition: background-color 0.3s;
         }
@@ -133,6 +186,7 @@
             margin-bottom: 10px;
             color: #666;
             font-style: italic;
+            font-family: var(--body-font);
         }
 
         .user-message {
@@ -142,6 +196,7 @@
             margin-bottom: 10px;
             align-self: flex-end;
             max-width: 80%;
+            font-family: var(--body-font);
         }
 
         .bot-message {
@@ -151,6 +206,7 @@
             margin-bottom: 10px;
             border-left: 4px solid var(--primary);
             max-width: 80%;
+            font-family: var(--body-font);
         }
 
         .sources {
@@ -160,11 +216,13 @@
             margin-top: 5px;
             font-size: 0.9em;
             border: 1px solid #eee;
+            font-family: var(--body-font);
         }
 
         .sources h4 {
             margin-top: 0;
             margin-bottom: 10px;
+            font-family: var(--heading-font);
         }
 
         .source-item {
@@ -247,6 +305,7 @@
             margin-bottom: 10px;
             font-size: 14px;
             color: #555;
+            font-family: var(--body-font);
         }
 
         .connection-status {
@@ -261,8 +320,9 @@
             font-size: 12px;
             color: #666;
             margin-top: 10px;
+            font-family: var(--body-font);
         }
-        </style>
+    </style>
 </head>
 <body>
     <div class="container">

@@ -9,10 +9,9 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - /mnt/marxist-chat-data/data/posts_cache:/app/posts_cache
-      - /mnt/marxist-chat-data/data/vector_store:/app/vector_store
-      - /mnt/marxist-chat-data/data/logs:/app/logs
-      - /mnt/marxist-chat-data/models:/app/models
+      - ./posts_cache:/app/posts_cache
+      - ./vector_store:/app/vector_store
+      - ./logs:/app/logs
     env_file:
       - .env
     deploy:
@@ -29,25 +28,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-  
-  nginx:
-    image: nginx:stable-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
-      - ./nginx/ssl:/etc/nginx/ssl
-      - ./static:/usr/share/nginx/html/static
-      - ./letsencrypt:/etc/letsencrypt
-    depends_on:
-      - marxist-chat
-
-  watchtower:
-    image: containrrr/watchtower
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: --interval 86400  # Check for updates once a day
-    restart: unless-stopped
-    

@@ -1,14 +1,21 @@
-FROM python:3.10-slim
+FROM python:3.10-bullseye
 
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies including those needed for llama-cpp-python
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
+    cmake \
     curl \
+    git \
+    python3-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for llama-cpp-python build
+ENV CMAKE_ARGS="-DLLAMA_CUBLAS=OFF"
+ENV FORCE_CMAKE=1
 
 # Copy requirements and install
 COPY requirements.txt .

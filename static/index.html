@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Marxist Chat</title>
-    <style>
+        <style>
         :root {
             --primary: #db1e1e;
             --primary-light: #ee8181;
@@ -187,8 +187,9 @@
             background-color: #ff9800;
         }
 
+        /* Explicitly define what the hidden class does */
         .hidden {
-            display: none;
+            display: none !important;
         }
 
         .typing-indicator {
@@ -251,7 +252,7 @@
             color: #666;
             margin-top: 10px;
         }
-    </style>
+        </style>
 </head>
 <body>
     <div class="container">
@@ -273,6 +274,7 @@
                 </div>
             </div>
             
+            <!-- Typing indicator - hidden by default -->
             <div class="typing-indicator hidden" id="typing-indicator">
                 <span></span>
                 <span></span>
@@ -302,13 +304,20 @@
             const statusText = document.getElementById('status-text');
             const typingIndicator = document.getElementById('typing-indicator');
 
-            // WebSocket connection
+            // Initialize variables
             let socket = null;
             let isStreaming = false;
             let streamingMessage = '';
             let currentStreamElement = null;
             let connectionTimeout = null;
+            let isWaitingForResponse = false; // Track if we're waiting for a response
             const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+            
+            // Force hide typing indicator on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                hideTypingIndicator();
+            });
+            
 
             // Send message
             sendBtn.addEventListener('click', function() {
@@ -373,6 +382,7 @@
                 socket.addEventListener('close', function(event) {
                     setStatus('offline', 'Ready');
                     isStreaming = false;
+                    isWaitingForResponse = false;
                     streamingMessage = '';
                     currentStreamElement = null;
                     hideTypingIndicator();
@@ -382,6 +392,7 @@
                 // Connection error
                 socket.addEventListener('error', function(event) {
                     setStatus('offline', 'Connection Error');
+                    isWaitingForResponse = false;
                     addSystemMessage('Error connecting to chat service. Please try again.');
                 });
             }
@@ -417,7 +428,8 @@
                     // Clear input
                     messageInput.value = '';
                     
-                    // Show typing indicator until streaming starts
+                    // Enable waiting state - the model is now "thinking"
+                    isWaitingForResponse = true;
                     showTypingIndicator();
                     
                     // Disable send button until response completes
@@ -430,28 +442,37 @@
                 switch (data.type) {
                     case 'system':
                         addSystemMessage(data.message);
-                        hideTypingIndicator();
                         break;
                     
                     case 'queue':
                         addSystemMessage(`${data.message}`);
+                        // Still waiting if in queue
+                        isWaitingForResponse = true;
                         break;
                     
                     case 'status':
                         addSystemMessage(data.message);
+                        // Keep waiting indicator if it's a status update
+                        isWaitingForResponse = true;
                         break;
                     
                     case 'stream_start':
+                        // The response is starting to stream, no longer just "thinking"
+                        isWaitingForResponse = false;
                         isStreaming = true;
                         streamingMessage = '';
                         currentStreamElement = addBotMessage('');
                         stopBtn.classList.remove('hidden');
-                        // Hide typing indicator when streaming starts
+                        
+                        // Hide typing indicator since we're now getting actual content
                         hideTypingIndicator();
                         break;
                     
                     case 'stream_token':
                         if (isStreaming && currentStreamElement) {
+                            // We're actively streaming content, not just "thinking"
+                            isWaitingForResponse = false;
+                            
                             // Add each token immediately to the displayed message
                             streamingMessage += data.data;
                             currentStreamElement.innerHTML = formatMessageText(streamingMessage);
@@ -464,7 +485,6 @@
                     case 'stream_end':
                         // Call onStreamEnd to reset UI state
                         onStreamEnd();
-                        hideTypingIndicator();
                         
                         // Make sure we have the complete message at the end
                         if (currentStreamElement && data.data) {
@@ -476,6 +496,7 @@
                         
                     case 'query_stopped':
                         isStreaming = false;
+                        isWaitingForResponse = false;
                         hideTypingIndicator();
                         stopBtn.classList.add('hidden');
                         sendBtn.disabled = false;
@@ -490,6 +511,7 @@
                         break;
                     
                     case 'error':
+                        isWaitingForResponse = false;
                         addSystemMessage(`Error: ${data.message}`);
                         hideTypingIndicator();
                         stopBtn.classList.add('hidden');
@@ -498,6 +520,13 @@
                     
                     default:
                         console.log('Unhandled message type:', data.type);
+                }
+                
+                // Show or hide typing indicator based on response state
+                if (isWaitingForResponse) {
+                    showTypingIndicator();
+                } else {
+                    hideTypingIndicator();
                 }
             }
 
@@ -508,6 +537,10 @@
                     socket.send(JSON.stringify({
                         command: "stop_query"
                     }));
+                    
+                    // Immediately update UI state
+                    isWaitingForResponse = false;
+                    hideTypingIndicator();
                 }
             }
 
@@ -597,10 +630,14 @@
                 statusText.textContent = text;
             }
 
-            // Show typing indicator
+            // Show typing indicator only when waiting for a response and not streaming
             function showTypingIndicator() {
-                typingIndicator.classList.remove('hidden');
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                if (isWaitingForResponse && !isStreaming) {
+                    typingIndicator.classList.remove('hidden');
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                } else {
+                    hideTypingIndicator(); // Ensure it's hidden in all other cases
+                }
             }
 
             // Hide typing indicator
@@ -612,7 +649,9 @@
             function onStreamEnd() {
                 sendBtn.disabled = false; // Re-enable send button
                 isStreaming = false;
+                isWaitingForResponse = false;
                 stopBtn.classList.add('hidden');
+                hideTypingIndicator();
             }
         });
     </script>

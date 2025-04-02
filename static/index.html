@@ -93,6 +93,17 @@
             margin-bottom: 10px; /* Space between card and footer */
         }
 
+        @media screen and (max-width: 900px) {
+            .container {
+                padding: 0 8px; /* Slightly smaller padding on very small screens */
+                margin: 10px auto; /* Reduce top/bottom margin on mobile */
+            }
+            
+            .card-container {
+                box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2); /* Slightly reduced shadow on mobile */
+            }
+        }
+
         header {
             background-color: var(--primary);
             color: var(--text-on-primary);

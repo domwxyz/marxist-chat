@@ -90,7 +90,7 @@
             box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25), 0 8px 10px rgba(0, 0, 0, 0.15);
             border-radius: 8px;
             overflow: hidden;
-            margin-bottom: 10px; /* Space between card and footer */
+            margin-bottom: 10px;
         }
 
         @media screen and (max-width: 900px) {
@@ -136,26 +136,38 @@
         .chat-container {
             flex-grow: 1;
             padding: 20px;
+            padding-bottom: 80px; /* Add padding to make room for fixed input */
             background-color: var(--surface);
             border-radius: 0 0 8px 8px;
             box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             display: flex;
             flex-direction: column;
             max-height: calc(100vh - 140px);
+            position: relative;
+            overflow: hidden; /* Prevents content from spilling outside container */
         }
+
 
         .chat-messages {
             flex-grow: 1;
             overflow-y: auto;
             padding: 10px;
-            margin-bottom: 20px;
+            margin-bottom: 10px; /* Reduced from 20px */
             border: 1px solid var(--divider);
             border-radius: 4px;
+            /* Ensure content doesn't disappear under the fixed input */
+            padding-bottom: 10px;
         }
 
         .chat-input {
             display: flex;
-            margin-top: 10px;
+            position: absolute; /* Fixed position relative to chat container */
+            bottom: 20px; /* Align to bottom with padding */
+            left: 20px;
+            right: 20px;
+            background-color: var(--surface);
+            padding: 10px 0;
+            z-index: 10; /* Ensure it stays above other content */
         }
 
         input[type="text"] {
@@ -177,6 +189,7 @@
             font-size: 16px;
             font-family: var(--heading-font) !important;
             transition: background-color 0.3s;
+            z-index: 11; /* Higher than chat input to ensure visibility */
         }
 
         button:hover {
@@ -199,6 +212,7 @@
             font-family: var(--heading-font) !important;
             margin-left: 10px;
             transition: background-color 0.3s;
+            z-index: 11; /* Higher than chat input to ensure visibility */
         }
 
         #stop-btn:hover {
@@ -281,7 +295,6 @@
             background-color: #ff9800;
         }
 
-        /* Explicitly define what the hidden class does */
         .hidden {
             display: none !important;
         }
@@ -292,6 +305,12 @@
             background-color: #f0f0f0;
             border-radius: 4px;
             margin-bottom: 10px;
+            /* Remove absolute positioning */
+            position: relative;
+            /* Add to normal flow at bottom of chat */
+            align-self: flex-start;
+            /* Match bot message styling partially */
+            border-left: 4px solid var(--primary-light);
         }
 
         .typing-indicator span {
@@ -339,7 +358,6 @@
             align-items: center;
         }
         
-        /* Footer style */
         footer {
             text-align: center;
             padding: 10px;
@@ -347,6 +365,8 @@
             color: #666;
             margin-top: 10px;
             font-family: var(--body-font);
+            position: relative;
+            z-index: 1; /* Lower than chat input */
         }
 
         footer a {
@@ -1075,7 +1095,28 @@
             // Show typing indicator only when waiting for a response and not streaming
             function showTypingIndicator() {
                 if (isWaitingForResponse && !isStreaming) {
+                    // Create the typing indicator if it doesn't exist
+                    let typingIndicator = document.getElementById('typing-indicator');
+                    if (!typingIndicator) {
+                        typingIndicator = document.createElement('div');
+                        typingIndicator.id = 'typing-indicator';
+                        typingIndicator.className = 'typing-indicator';
+                        
+                        // Create the dots
+                        for (let i = 0; i < 3; i++) {
+                            const dot = document.createElement('span');
+                            typingIndicator.appendChild(dot);
+                        }
+                    }
+                    
+                    // Remove the hidden class
                     typingIndicator.classList.remove('hidden');
+                    
+                    // Append to chat messages container as the last item
+                    const chatMessages = document.getElementById('chat-messages');
+                    chatMessages.appendChild(typingIndicator);
+                    
+                    // Scroll to bottom to ensure it's visible
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                 } else {
                     hideTypingIndicator(); // Ensure it's hidden in all other cases
@@ -1084,7 +1125,12 @@
 
             // Hide typing indicator
             function hideTypingIndicator() {
-                typingIndicator.classList.add('hidden');
+                const typingIndicator = document.getElementById('typing-indicator');
+                if (typingIndicator) {
+                    // Rather than just hiding it, we'll remove it from the DOM
+                    // This ensures it doesn't affect the flow of messages
+                    typingIndicator.parentNode.removeChild(typingIndicator);
+                }
             }
             
             // Additional function to call when stream ends

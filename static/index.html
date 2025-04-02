@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Marxist Chat</title>
-    <link rel="icon" href="./static/images/favicon.ico" type="image/x-icon">
-    <link rel="shortcut icon" href="./static/images/favicon.ico" type="image/x-icon">
-    <link rel="preload" href="./static/fonts/built-titling.otf" as="font" type="font/otf" crossorigin>
+    <link rel="icon" href="./images/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="./images/favicon.ico" type="image/x-icon">
+    <link rel="preload" href="./fonts/built-titling.otf" as="font" type="font/otf" crossorigin>
     <style>
         @font-face {
             font-family: 'Built Titling';
@@ -53,7 +53,7 @@
             --primary-light: #ee8181;
             --primary-dark: #901414;
             --text-on-primary: #ffffff;
-            --background: #f5f5f5;
+            --background: #dbd6d6;
             --surface: #ffffff;
             --text: #212121;
             --divider: #e0e0e0;
@@ -76,17 +76,27 @@
 
         .container {
             max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
+            margin: 20px auto;
+            padding: 0;
             display: flex;
             flex-direction: column;
-            height: 100vh;
+            height: calc(100vh - 40px);
+        }
+
+        .card-container {
+            display: flex;
+            flex-direction: column;
+            flex-grow: 1;
+            box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25), 0 8px 10px rgba(0, 0, 0, 0.15);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 10px; /* Space between card and footer */
         }
 
         header {
             background-color: var(--primary);
             color: var(--text-on-primary);
-            padding: 20px;
+            padding: 12px 20px;
             text-align: center;
             border-radius: 8px 8px 0 0;
         }
@@ -94,17 +104,22 @@
         .header-content {
             display: flex;
             align-items: center;
+            justify-content: center;
+            position: relative;
         }
 
         .logo {
             height: 40px;
-            margin-right: 15px;
+            position: absolute;
+            left: 0;
         }
 
         h1 {
             margin: 0;
-            font-size: 24px;
+            font-size: 32px;
             font-family: var(--heading-font) !important;
+            text-align: center;
+            width: 100%;
         }
 
         .chat-container {
@@ -322,47 +337,60 @@
             margin-top: 10px;
             font-family: var(--body-font);
         }
+
+        footer a {
+            color: var(--primary-dark);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        footer a:hover {
+            color: var(--primary);
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <header>
-            <div class="header-content">
-                <img src="https://marxist.chat/images/chat_logo.png" alt="Logo" class="logo">
-                <h1>Marxist Chat</h1>
-            </div>
-        </header>
-
-        <div class="chat-container">
-            <div class="status-bar">
-                <div class="connection-status">
-                    <span class="status-indicator status-offline" id="status-indicator"></span>
-                    <span id="status-text">Ready</span>
+        <div class="card-container">
+            <header>
+                <div class="header-content">
+                    <img src="https://marxist.chat/images/chat_logo.png" alt="Logo" class="logo">
+                    <h1>Marxist Chat</h1>
                 </div>
-            </div>
-            
-            <div class="chat-messages" id="chat-messages">
-                <div class="system-message">
-                    Welcome to Marxist Chat. Ask questions about Marxist theory and communist principles.
-                </div>
-            </div>
-            
-            <!-- Typing indicator - hidden by default -->
-            <div class="typing-indicator hidden" id="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
+            </header>
 
-            <div class="chat-input">
-                <input type="text" id="message-input" placeholder="Type your question here...">
-                <button id="send-btn">Send</button>
-                <button id="stop-btn" class="hidden">Stop</button>
+            <div class="chat-container">
+                <div class="status-bar">
+                    <div class="connection-status">
+                        <span class="status-indicator status-offline" id="status-indicator"></span>
+                        <span id="status-text">Ready</span>
+                    </div>
+                </div>
+                
+                <div class="chat-messages" id="chat-messages">
+                    <div class="system-message">
+                        Welcome to Marxist Chat. Ask questions about Marxist theory and communist principles.
+                    </div>
+                </div>
+                
+                <!-- Typing indicator - hidden by default -->
+                <div class="typing-indicator hidden" id="typing-indicator">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+
+                <div class="chat-input">
+                    <input type="text" id="message-input" placeholder="Type your question here...">
+                    <button id="send-btn">Send</button>
+                    <button id="stop-btn" class="hidden">Stop</button>
+                </div>
             </div>
         </div>
         
         <footer>
-            Revolutionary Communists of America - Powered by RAG
+            <a href="https://communistusa.org">Revolutionary Communists of America</a> - Powered by RAG
         </footer>
     </div>
 

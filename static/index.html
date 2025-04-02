@@ -431,6 +431,7 @@
             document.addEventListener('DOMContentLoaded', function() {
                 hideTypingIndicator();
                 setupUserActivityTracking();
+                ensureChatInputAccessible();
             });
             
 
@@ -585,6 +586,12 @@
                         hideTypingIndicator();
                         clearTimeout(connectionTimeout);
                         
+                        // Re-enable the send button
+                        sendBtn.disabled = false;
+                        
+                        // Ensure input field is enabled
+                        messageInput.disabled = false;
+                        
                         // Clear socket reference
                         socket = null;
                         
@@ -601,6 +608,12 @@
                         isConnecting = false;
                         isWaitingForResponse = false;
                         hideTypingIndicator();
+                        
+                        // Explicitly re-enable the send button when there's an error
+                        sendBtn.disabled = false;
+                        
+                        // Ensure input field is enabled
+                        messageInput.disabled = false;
                         
                         // Clear socket reference on error
                         socket = null;
@@ -726,6 +739,8 @@
                 
                 // Disable the send button during connection and sending
                 sendBtn.disabled = true;
+                // Disable the input field during sending to prevent multiple submissions
+                messageInput.disabled = true;
                 
                 // Force a new connection if we're disconnected
                 if (!socket || socket.readyState !== WebSocket.OPEN) {
@@ -764,10 +779,19 @@
                     } catch (error) {
                         console.error("Connection failed:", error);
                         addSystemMessage(`Failed to connect: ${error.message}. Please try again.`);
+                        // Re-enable the UI components even if connection fails
+                        messageInput.disabled = false;
                         sendBtn.disabled = false;
                         return;
                     }
                 }
+
+                setTimeout(() => {
+                    if (sendBtn.disabled || messageInput.disabled) {
+                        console.log("UI recovery timeout triggered - ensuring UI is responsive");
+                        ensureChatInputAccessible();
+                    }
+                }, 30000);
                 
                 // If we got here, we should have a valid connection
                 if (socket && socket.readyState === WebSocket.OPEN) {
@@ -789,6 +813,8 @@
                 } else {
                     console.error("Socket still not open after connection attempt");
                     addSystemMessage("Connection issue. Please refresh the page and try again.");
+                    // Make sure UI is usable even if there's an error
+                    messageInput.disabled = false;
                     sendBtn.disabled = false;
                 }
             }
@@ -819,6 +845,7 @@
                         streamingMessage = '';
                         currentStreamElement = addBotMessage('');
                         stopBtn.classList.remove('hidden');
+                        sendBtn.disabled = true;
                         
                         // Hide typing indicator since we're now getting actual content
                         hideTypingIndicator();
@@ -838,15 +865,14 @@
                         }
                         break;
                     
-                    case 'stream_end':
-                        // Call onStreamEnd to reset UI state
-                        onStreamEnd();
-                        
-                        // Make sure we have the complete message at the end
-                        if (currentStreamElement && data.data) {
-                            // Replace the current message with the complete message to ensure consistency
-                            streamingMessage = data.data;
-                            currentStreamElement.innerHTML = formatMessageText(streamingMessage);
+                        case 'stream_end':
+                        // Only process if we're actually streaming
+                        if (isStreaming) {
+                            onStreamEnd();
+                            if (currentStreamElement && data.data) {
+                                streamingMessage = data.data;
+                                currentStreamElement.innerHTML = formatMessageText(streamingMessage);
+                            }
                         }
                         break;
                         
@@ -856,7 +882,6 @@
                         hideTypingIndicator();
                         stopBtn.classList.add('hidden');
                         sendBtn.disabled = false;
-                        addSystemMessage(data.message || "Query was stopped");
                         break;
                     
                     case 'sources':
@@ -872,6 +897,7 @@
                         hideTypingIndicator();
                         stopBtn.classList.add('hidden');
                         sendBtn.disabled = false;
+                        messageInput.disabled = false;
                         break;
                     
                     default:
@@ -884,6 +910,31 @@
                 } else {
                     hideTypingIndicator();
                 }
+
+                ensureChatInputAccessible();
+            }
+
+            function ensureChatInputAccessible() {
+                // Make sure the chat input container is visible
+                const chatInputContainer = document.querySelector('.chat-input');
+                if (chatInputContainer) {
+                    chatInputContainer.classList.remove('hidden');
+                }
+                
+                // Make sure the send button is enabled
+                if (sendBtn) {
+                    sendBtn.disabled = isStreaming || isWaitingForResponse
+                }
+                
+                // Make sure the input field is enabled
+                if (messageInput) {
+                    messageInput.disabled = false;
+                }
+                
+                // Hide the stop button if streaming is not active
+                if (!isStreaming && stopBtn) {
+                    stopBtn.classList.add('hidden');
+                }
             }
 
             // Add function to stop query
@@ -893,11 +944,29 @@
                     socket.send(JSON.stringify({
                         command: "stop_query"
                     }));
-                    
-                    // Immediately update UI state
-                    isWaitingForResponse = false;
-                    hideTypingIndicator();
                 }
+
+                // Immediately reset all streaming states
+                isStreaming = false;
+                isWaitingForResponse = false;
+                streamingMessage = '';
+                currentStreamElement = null;
+
+                // Force UI reset
+                hideTypingIndicator();
+                stopBtn.classList.add('hidden');
+                
+                // Re-enable input and send button
+                sendBtn.disabled = false;
+                messageInput.disabled = false;
+                
+                // Clear any pending streaming updates
+                if (currentStreamElement) {
+                    currentStreamElement.innerHTML += ' (response stopped)';
+                }
+
+                // Ensure chat remains usable
+                ensureChatInputAccessible();
             }
 
             // Add system message to chat
@@ -998,6 +1067,8 @@
                     if (!socket || socket.readyState !== WebSocket.OPEN) {
                         setStatus('offline', 'Ready');
                     }
+
+                    ensureChatInputAccessible();
                 });
             }
 
@@ -1018,12 +1089,26 @@
             
             // Additional function to call when stream ends
             function onStreamEnd() {
-                sendBtn.disabled = false; // Re-enable send button
+                // Re-enable send button
+                sendBtn.disabled = false;
+                
+                // Reset all streaming states
                 isStreaming = false;
                 isWaitingForResponse = false;
+                
+                // Hide the stop button
                 stopBtn.classList.add('hidden');
+                
+                // Ensure typing indicator is hidden
                 hideTypingIndicator();
+                
+                // Make sure the input field is enabled and visible
+                messageInput.disabled = false;
+                document.querySelector('.chat-input').classList.remove('hidden');
+
+                ensureChatInputAccessible();
             }
+
         });
     </script>
 </body>

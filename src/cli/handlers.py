@@ -1,5 +1,6 @@
 import shutil
 import sys
+import re
 
 from core.feed_processor import FeedProcessor
 from core.vector_store import VectorStoreManager

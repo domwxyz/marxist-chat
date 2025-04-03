@@ -329,59 +329,92 @@ class VectorStoreManager:
             return False
             
         try:
+            # Load metadata repository to check for existing documents
+            if not self.metadata_repository.is_loaded:
+                success = self.metadata_repository.load_metadata_index()
+                if not success:
+                    print("\nWarning: Failed to load metadata index. Attempting to rebuild...")
+                    success = self.metadata_repository.build_metadata_index(force_rebuild=True)
+                    if not success:
+                        print("\nError: Failed to build metadata index. Cannot determine latest documents.")
+                        return False
+            
             # Get the latest document date for each feed source
             latest_dates = self.get_latest_document_dates_by_feed()
             if not latest_dates:
-                print("\nNo existing documents found. You should create the vector store instead.")
+                print("\nNo existing documents found in metadata. You should create the vector store instead.")
                 return False
                 
-            # Initialize FeedProcessor
+            # Create a feed processor for fetching new entries
             feed_processor = FeedProcessor()
-            feed_urls = config.RSS_FEED_URLS
             
+            # Process each feed configuration individually
             all_new_documents = []
+            feed_configs = config.RSS_FEED_CONFIG
             
-            # Process each feed individually to check for new content
-            for feed_url in feed_urls:
+            # Debug output
+            print(f"\nLatest document dates by feed: {latest_dates}")
+            print(f"\nProcessing {len(feed_configs)} feed configurations")
+            
+            for feed_config in feed_configs:
+                feed_url = feed_config["url"]
+                
+                # Get the feed directory name using the same method as in feed_processor
                 feed_dir_name = feed_processor._get_feed_directory_name(feed_url)
                 latest_date = latest_dates.get(feed_dir_name, None)
                 
-                if latest_date:
-                    print(f"\nLooking for documents newer than {latest_date} from {feed_url}")
-                else:
-                    print(f"\nNo existing documents found for {feed_url}, will fetch all entries")
+                print(f"\nChecking feed: {feed_url}")
+                print(f"Feed directory name: {feed_dir_name}")
+                print(f"Latest document date: {latest_date or 'None'}")
                 
-                # For each feed, fetch entries since its specific latest date
+                # Fetch new entries since last document date
                 if latest_date:
-                    # Only fetch entries for this specific feed
-                    entries = []
-                    new_entries = feed_processor.fetch_new_entries(since_date=latest_date)
+                    print(f"Fetching entries newer than {latest_date}...")
                     
-                    # Filter entries to only include those from this feed
+                    # Specific feed processor for this URL
+                    single_feed_processor = FeedProcessor([feed_url])
+                    
+                    # Fetch only new entries for this feed
+                    new_entries = single_feed_processor.fetch_new_entries(since_date=latest_date)
+                    
+                    # Mark entries with feed URL for tracking
                     for entry in new_entries:
-                        if entry.get('_feed_url') == feed_url:
-                            entries.append(entry)
+                        entry['_feed_url'] = feed_url
+                        
+                    print(f"Found {len(new_entries)} new entries")
+                    
+                    # Process and save new entries
+                    if new_entries:
+                        new_documents = single_feed_processor.process_entries(new_entries)
+                        if new_documents:
+                            all_new_documents.extend(new_documents)
+                            print(f"Successfully processed {len(new_documents)} new documents")
+                        else:
+                            print("No valid documents created from new entries")
                 else:
-                    # For feeds with no existing documents, fetch all entries
-                    entries = feed_processor.fetch_rss_entries(feed_url)
-                    # Add source feed information
+                    print(f"No existing documents for this feed. Fetching all entries...")
+                    
+                    # Specific feed processor for this URL
+                    single_feed_processor = FeedProcessor([feed_url])
+                    
+                    # Fetch all entries for this feed
+                    entries = single_feed_processor.fetch_rss_entries(feed_url)
+                    
+                    # Mark entries with feed URL for tracking
                     for entry in entries:
                         entry['_feed_url'] = feed_url
-                
-                if not entries:
-                    print(f"\nNo new entries found in RSS feed: {feed_url}")
-                    continue
+                        
+                    print(f"Found {len(entries)} entries")
                     
-                print(f"\nFound {len(entries)} new entries from {feed_url}. Processing...")
-                
-                # Process entries and save to respective feed directory
-                new_documents = feed_processor.process_entries(entries)
-                if new_documents:
-                    all_new_documents.extend(new_documents)
-                    print(f"\nSuccessfully processed {len(new_documents)} new documents from {feed_url}")
-                else:
-                    print(f"\nNo new documents were processed from {feed_url}")
-
+                    # Process and save entries
+                    if entries:
+                        new_documents = single_feed_processor.process_entries(entries)
+                        if new_documents:
+                            all_new_documents.extend(new_documents)
+                            print(f"Successfully processed {len(new_documents)} new documents")
+                        else:
+                            print("No valid documents created from entries")
+            
             # If no new documents across all feeds, return early
             if not all_new_documents:
                 print("\nNo new documents were processed from any feed.")
@@ -390,20 +423,93 @@ class VectorStoreManager:
             print(f"\nTotal new documents across all feeds: {len(all_new_documents)}")
 
             # Load existing vector store
+            print("\nLoading existing vector store...")
             index = self.load_vector_store()
             if not index:
-                print("\nFailed to load vector store.")
+                print("Failed to load vector store.")
                 return False
 
-            # Insert documents into the index
-            for doc in all_new_documents:
-                # Add document to index
-                nodes = index.insert(doc)
+            # Initialize embedding model if needed for document insertion
+            if not hasattr(Settings, 'embed_model') or Settings.embed_model is None:
+                from core.llm_manager import LLMManager
+                print("Initializing embedding model...")
+                embed_model = LLMManager.initialize_embedding_model()
+                Settings.embed_model = embed_model
                 
-                # Enhance the newly created nodes
-                for node in nodes:
-                    if hasattr(node, 'metadata') and 'file_name' in node.metadata:
-                        node.metadata['chunk_id'] = f"{node.metadata['file_name']}:{node.start_char_idx}-{node.end_char_idx}"
+            # Configure node parser if not already set
+            if not hasattr(Settings, 'node_parser') or Settings.node_parser is None:
+                from llama_index.core.node_parser import SentenceSplitter
+                print("Initializing node parser...")
+                Settings.node_parser = SentenceSplitter(
+                    chunk_size=512,
+                    chunk_overlap=50,
+                    paragraph_separator="\n\n"
+                )
+
+            # Insert documents into the index
+            print(f"Inserting {len(all_new_documents)} new documents into the vector store...")
+            successful_inserts = 0
+            
+            # Create a sentence splitter for document parsing
+            from llama_index.core.node_parser import SentenceSplitter
+            parser = SentenceSplitter(chunk_size=512, chunk_overlap=50)
+            
+            for i, doc in enumerate(all_new_documents):
+                try:
+                    # Get document name for logging
+                    doc_name = "unknown"
+                    if hasattr(doc, 'metadata'):
+                        # Try different metadata fields to identify the document
+                        if 'file_name' in doc.metadata:
+                            doc_name = doc.metadata['file_name']
+                        elif 'title' in doc.metadata:
+                            doc_name = doc.metadata['title']
+                    
+                    print(f"Processing document {i+1}/{len(all_new_documents)}: {doc_name}")
+                    
+                    # Ensure document metadata is compatible with ChromaDB requirements
+                    if hasattr(doc, 'metadata'):
+                        # Process categories if present to ensure it's a string
+                        if 'categories' in doc.metadata and isinstance(doc.metadata['categories'], (list, tuple)):
+                            doc.metadata['categories'] = ','.join(str(cat) for cat in doc.metadata['categories'] if cat)
+                        
+                        # Ensure all metadata values are of compatible types
+                        for key, value in list(doc.metadata.items()):
+                            if not isinstance(value, (str, int, float, type(None))):
+                                doc.metadata[key] = str(value)
+                    
+                    # Use the alternative method directly (parse document into nodes first, then insert)
+                    nodes = parser.get_nodes_from_documents([doc])
+                    
+                    if nodes:
+                        # Insert individual nodes
+                        for node in nodes:
+                            # Copy document metadata to node
+                            for key, value in doc.metadata.items():
+                                node.metadata[key] = value
+                                
+                            # Add chunk_id to metadata for tracking
+                            if 'file_name' in node.metadata:
+                                node.metadata['chunk_id'] = f"{node.metadata['file_name']}:{node.start_char_idx}-{node.end_char_idx}"
+                            
+                            # Insert node directly
+                            index.docstore.add_documents([node])
+                        
+                        successful_inserts += 1
+                        print(f"Successfully inserted document: {doc_name}")
+                    else:
+                        print(f"Warning: Failed to create nodes for document: {doc_name}")
+                        continue
+                    
+                    if (i + 1) % 5 == 0 or i + 1 == len(all_new_documents):
+                        print(f"Progress: {i + 1}/{len(all_new_documents)} documents processed (successful: {successful_inserts})")
+                        
+                except Exception as e:
+                    print(f"Error inserting document {i+1} ({doc_name}): {e}")
+                    print(f"Document details: id={getattr(doc, 'doc_id', 'unknown')}, "
+                        f"length={len(doc.text) if hasattr(doc, 'text') else 'unknown'}")
+                    print(f"Metadata keys: {list(doc.metadata.keys()) if hasattr(doc, 'metadata') else 'none'}")
+                    continue
 
             # Rebuild metadata index to include new documents
             print("\nUpdating metadata index...")

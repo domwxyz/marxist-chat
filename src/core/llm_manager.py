@@ -79,10 +79,8 @@ class LLMManager:
                 model_path=None,
                 temperature=temperature,
                 max_new_tokens=256,
-                context_window=4096,
-                model_kwargs={"n_threads": threads, 
-                              "n_batch": 512, 
-                              "use_mlock": True},
+                context_window=8192,
+                model_kwargs={"n_threads": threads},
                 verbose=False
             )
             

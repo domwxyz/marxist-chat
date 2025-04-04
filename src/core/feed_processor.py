@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 import os
 import re
 
+from core.metadata_repository import MetadataRepository
 from utils.text_utils import ensure_unicode, preprocess_content, clean_rss_boilerplate
 from utils.metadata_utils import clean_category, sanitize_filename, format_date, format_metadata
 import config
@@ -178,8 +179,12 @@ class FeedProcessor:
         return entries
     
     def fetch_new_entries(self, since_date=None):
-        """Fetch only new entries from RSS feeds since a given date"""
+        """Fetch only new entries from RSS feeds since a given date with duplicate detection"""
         all_entries = []
+        
+        # Initialize duplicate detector
+        from core.duplicate_detector import DuplicateDetector
+        duplicate_detector = DuplicateDetector(MetadataRepository(self.cache_dir))
         
         if not since_date:
             print("No date specified, fetching all entries.")
@@ -198,7 +203,7 @@ class FeedProcessor:
             # Initialize pagination variables
             page = 1  # For WordPress
             limitstart = 0  # For Joomla
-            limit_increment = feed_config.get("limit_increment", 5)  # Default increment for Joomla feeds
+            limit_increment = feed_config.get("limit_increment", 5)
             has_more = True
             seen_urls = set()
             found_article_count = 0
@@ -226,24 +231,42 @@ class FeedProcessor:
                     current_url = feed_url
                     pagination_desc = "first page"
                     
+                print(f"Fetching from URL: {current_url}")
+                
+                # Add a user agent to avoid being blocked
                 headers = {'User-Agent': 'Mozilla/5.0 (compatible; RSSBot/1.0)'}
                 feed = feedparser.parse(current_url, request_headers=headers)
                 
                 print(f"Processing {pagination_desc}... Found {len(feed.entries)} entries.")
                 
                 if not feed.entries:
-                    print("No entries found on this page.")
+                    print("No entries found on this page. Moving to next URL if available.")
                     has_more = False
                     break
-                    
+                
+                # Process entries in a batch
                 new_entries_on_page = 0
                 
                 for entry in feed.entries:
                     entry_url = entry.get('link', '')
                     
+                    # Skip if no URL or already seen in this session
                     if not entry_url or entry_url in seen_urls:
                         continue
                         
+                    # Skip if URL already exists in our archive
+                    if duplicate_detector.is_duplicate_url(entry_url):
+                        print(f"Skipping already archived URL: {entry_url}")
+                        continue
+                    
+                    # Check title for potential duplicates
+                    title = entry.get('title', '')
+                    similar_titles = duplicate_detector.find_similar_titles(title)
+                    if similar_titles:
+                        # Log the potential duplicate but still fetch it
+                        # We'll do more thorough checking in process_entries
+                        print(f"Note: '{title}' has similar titles in the archive")
+                    
                     # Extract date to check if it's newer than since_date
                     published_date = entry.get('published', entry.get('pubDate', 'Unknown Date'))
                     entry_date = format_date(published_date)
@@ -267,36 +290,40 @@ class FeedProcessor:
                     new_entries_on_page += 1
                 
                 print(f"Added {new_entries_on_page} new entries.")
-                    
-                # If no new entries on this page or we've found older content, stop
-                if new_entries_on_page == 0 or not has_more:
+                
+                # If no new entries on this page, stop
+                if new_entries_on_page == 0:
+                    print("No new entries found on this page.")
                     has_more = False
                 else:
-                    # Update pagination variables based on the feed type
+                    # Update pagination based on feed type
                     if pagination_type == "joomla":
+                        # For Joomla, increment the limitstart parameter
                         limitstart += limit_increment
                         print(f"Moving to limitstart={limitstart}...")
                     elif pagination_type == "wordpress":
+                        # For WordPress, increment the page number
                         page += 1
                         print(f"Moving to page {page}...")
-                    
-                # Check for standard RSS pagination links
+                
+                # Check for standard RSS pagination links (works with some feeds)
                 next_page = None
                 for link in feed.feed.get("links", []):
                     if link.rel == "next":
                         next_page = link.href
+                        print(f"Found 'next' link: {next_page}")
                         break
                 
                 if next_page and next_page != current_url:
-                    print(f"Found 'next' link: {next_page}")
-                    feed_url = next_page  # Update base URL
-                    
-                    # Reset pagination counters when changing URLs
+                    print(f"Switching to next URL: {next_page}")
+                    feed_url = next_page  # Update base URL if different
                     if pagination_type == "joomla":
+                        # Reset limitstart if we're switching to a completely different URL
                         limitstart = 0
                     elif pagination_type == "wordpress":
+                        # Reset page counter if we're switching to a different URL
                         page = 1
-                    
+                        
                 time.sleep(0.2)  # Respect server resources
         
         print(f"Finished fetching new entries. Total: {len(all_entries)}")
@@ -412,12 +439,17 @@ class FeedProcessor:
         return description, content
     
     def process_entries(self, entries):
-        """Process and store entries as documents - optimized version"""
+        """Process and store entries as documents with duplicate detection"""
         if not entries:
             print("No entries to process.")
             return []
             
+        # Initialize duplicate detector
+        from core.duplicate_detector import DuplicateDetector
+        duplicate_detector = DuplicateDetector(MetadataRepository(self.cache_dir))
+        
         documents = []
+        skipped_duplicates = 0
         
         # Generate a list of existing files for each feed source
         existing_files_by_feed = {}
@@ -436,16 +468,22 @@ class FeedProcessor:
             for entry in batch:
                 try:
                     # Get the source feed URL (added during fetching)
-                    feed_url = entry.get('_feed_url', self.feed_urls[0])  # Default to first feed if not found
+                    feed_url = entry.get('_feed_url', self.feed_urls[0])
+                    
+                    # Extract metadata from the full feedparser entry
+                    metadata = self.extract_metadata_from_entry(entry)
+                    
+                    # Check for duplicate URL
+                    if duplicate_detector.is_duplicate_url(metadata.get('url', '')):
+                        print(f"Skipping duplicate URL: {metadata.get('title', 'Unknown')}")
+                        skipped_duplicates += 1
+                        continue
                     
                     # Get the cache directory for this feed
                     feed_cache_dir = self._get_feed_cache_dir(feed_url)
                     
                     # Track last known date per feed
                     last_known_date = datetime.now().strftime('%Y-%m-%d')  # Default fallback
-                    
-                    # Extract metadata from the full feedparser entry
-                    metadata = self.extract_metadata_from_entry(entry)
                     
                     # If we got a valid date, update our last_known_date
                     if metadata['date'] and metadata['date'] != 'Unknown Date':
@@ -466,7 +504,7 @@ class FeedProcessor:
                         filename = f"{date_prefix}_{safe_title}-{counter}.txt"
                         counter += 1
                     
-                    # Add to our tracking set for future checks in the same batch
+                    # Add to tracking set for future checks in the same batch
                     existing_files_by_feed.setdefault(feed_url, set()).add(filename)
                     
                     # Add filename to metadata
@@ -478,7 +516,7 @@ class FeedProcessor:
                     # Create metadata text block
                     metadata_formatted = format_metadata(metadata)
                     
-                    # Combine content with clear section markers - build as list and join once
+                    # Combine content with clear section markers
                     full_content = [
                         metadata_formatted,
                         "Description:",
@@ -490,6 +528,15 @@ class FeedProcessor:
                     # Join with proper line endings
                     document_text = '\n'.join(full_content)
                     
+                    # Check for duplicates
+                    is_duplicate, original_meta = duplicate_detector.is_duplicate(metadata, document_text)
+                    
+                    if is_duplicate:
+                        original_file = original_meta.get('file_name', 'unknown')
+                        print(f"Skipping duplicate article: '{metadata.get('title')}' - original: '{original_meta.get('title')}' ({original_file})")
+                        skipped_duplicates += 1
+                        continue
+                    
                     # Create document object
                     doc = Document(
                         text=document_text,
@@ -497,6 +544,9 @@ class FeedProcessor:
                     )
                     batch_documents.append((doc, feed_url))
                     documents.append(doc)
+                    
+                    # Add to duplicate detector
+                    duplicate_detector.add_document(metadata)
                     
                 except Exception as e:
                     print(f"Error processing entry {entry.get('title', 'unknown')}: {str(e)}")
@@ -506,7 +556,7 @@ class FeedProcessor:
             self._write_documents_batch(batch_documents)
             print(f"Processed batch of {len(batch_documents)} documents. Total: {len(documents)}")
         
-        print(f"Successfully processed {len(documents)} documents.")
+        print(f"Successfully processed {len(documents)} documents (skipped {skipped_duplicates} duplicates).")
         return documents
 
     def _write_documents_batch(self, documents):

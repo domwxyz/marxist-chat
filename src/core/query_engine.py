@@ -6,6 +6,11 @@ import logging
 import re
 import traceback
 
+from queue import Queue, Empty
+import threading
+import time
+import uuid
+
 from llama_index.core import PromptTemplate, Settings
 from llama_index.core.postprocessor import SimilarityPostprocessor
 from llama_index.core.query_engine import RetrieverQueryEngine
@@ -17,6 +22,110 @@ from core.llm_manager import LLMManager
 from core.metadata_repository import MetadataRepository
 
 logger = logging.getLogger("core.query_engine")
+
+class QueryProcessor:
+    """Process queries in a dedicated thread to avoid concurrency issues"""
+    def __init__(self, model):
+        self.model = model
+        self.request_queue = Queue()
+        self.results = {}
+        self.active = True
+        self.worker_thread = threading.Thread(target=self._process_queue)
+        self.worker_thread.daemon = True
+        self.worker_thread.start()
+        logger.info("Query processor initialized with dedicated worker thread")
+    
+    def _process_queue(self):
+        """Worker thread that processes queries sequentially"""
+        while self.active:
+            try:
+                # Get the next request
+                request_id, query_text, callback = self.request_queue.get(timeout=0.1)
+                logger.info(f"Processing queued request {request_id}")
+                
+                # Process it
+                try:
+                    response = self.model.query(query_text)
+                    # Store the response for streaming
+                    self.results[request_id] = {
+                        "response": response, 
+                        "tokens": [], 
+                        "complete": False,
+                        "timestamp": time.time()
+                    }
+                    
+                    # Stream tokens from the response
+                    for token in response.response_gen:
+                        self.results[request_id]["tokens"].append(token)
+                        # Call optional progress callback
+                        if callback:
+                            callback(request_id, token)
+                    
+                    # Mark as complete
+                    self.results[request_id]["complete"] = True
+                    logger.info(f"Request {request_id} completed")
+                    
+                    # Store sources if available
+                    if hasattr(response, 'source_nodes'):
+                        self.results[request_id]["sources"] = response.source_nodes
+                    elif hasattr(response, '_source_nodes'):
+                        self.results[request_id]["sources"] = response._source_nodes
+                        
+                except Exception as e:
+                    logger.error(f"Error processing request {request_id}: {e}")
+                    self.results[request_id] = {"error": str(e), "complete": True}
+                finally:
+                    self.request_queue.task_done()
+                    
+                    # Clean up old results (keep for 30 minutes)
+                    self._cleanup_old_results()
+                    
+            except Empty:
+                pass  # No requests, continue checking
+    
+    def _cleanup_old_results(self):
+        """Remove old results to prevent memory leaks"""
+        now = time.time()
+        expired_ids = []
+        
+        for req_id, result in self.results.items():
+            # Keep results for 30 minutes
+            if result.get("complete", False) and "timestamp" in result:
+                if now - result["timestamp"] > 1800:  # 30 minutes
+                    expired_ids.append(req_id)
+        
+        # Remove expired results
+        for req_id in expired_ids:
+            del self.results[req_id]
+            
+    def add_request(self, request_id, query_text, callback=None):
+        """Add a query to the processing queue"""
+        logger.info(f"Adding request {request_id} to queue")
+        self.request_queue.put((request_id, query_text, callback))
+        return request_id
+        
+    def get_tokens(self, request_id, last_index=0):
+        """Get new tokens for a request"""
+        if request_id not in self.results:
+            return [], False, "Request not found"
+            
+        result = self.results[request_id]
+        if "error" in result:
+            return [], True, result["error"]
+            
+        new_tokens = result["tokens"][last_index:]
+        return new_tokens, result["complete"], None
+        
+    def get_sources(self, request_id):
+        """Get sources for a completed request"""
+        if request_id not in self.results:
+            return None
+            
+        result = self.results[request_id]
+        if not result.get("complete", False):
+            return None
+            
+        return result.get("sources", None)
 
 class QueryEngine:
     def __init__(self, vector_store_dir=None):
@@ -30,6 +139,11 @@ class QueryEngine:
     def initialize(self) -> bool:
         """Initialize the query engine with the vector store and streaming only"""
         try:
+            # Check if already initialized
+            if self.query_engine is not None and hasattr(self, 'query_processor'):
+                logger.info("Query engine already initialized")
+                return True
+                
             # Load vector store
             self.index = self.vector_store_manager.load_vector_store()
             if not self.index:
@@ -59,7 +173,7 @@ class QueryEngine:
                 "<|im_start|>assistant\n"
             )
             
-            # Create a streaming query engine only
+            # Create a streaming query engine
             self.query_engine = self.index.as_query_engine(
                 similarity_top_k=5,
                 node_postprocessors=[
@@ -70,7 +184,10 @@ class QueryEngine:
                 streaming=True
             )
             
-            logger.info("Streaming query engine initialized successfully")
+            # Create a processor that will handle concurrent requests
+            self.query_processor = QueryProcessor(self.query_engine)
+            
+            logger.info("Query engine and processor initialized successfully")
             return True
                 
         except Exception as e:
@@ -139,46 +256,65 @@ class QueryEngine:
             raise
     
     async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None, start_date=None, end_date=None) -> AsyncGenerator[str, None]:
-        """Process a query and stream the response tokens asynchronously with stop capability"""
-        if not self.query_engine:
-            raise ValueError("Query engine not initialized. Call initialize() first.")
+        """Process a query and stream response asynchronously with efficient concurrency"""
+        if not hasattr(self, 'query_processor') or not self.query_processor:
+            raise ValueError("Query processor not initialized")
         
         # Reset sources for the new query
         self.last_sources = []
         
         try:
-            # Get streaming response directly
-            logger.info(f"Processing streaming query: {query_text[:100]}...")
-            streaming_response = self.query_engine.query(query_text)
+            # Generate a unique request ID
+            request_id = f"req_{uuid.uuid4().hex[:8]}"
             
-            # Store source nodes before streaming begins if available
-            if hasattr(streaming_response, 'source_nodes'):
-                self.last_sources = streaming_response.source_nodes
-            elif hasattr(streaming_response, '_source_nodes'):
-                self.last_sources = streaming_response._source_nodes
+            # Add to queue processor
+            self.query_processor.add_request(request_id, query_text)
+            logger.info(f"Added request {request_id} to queue, now streaming responses")
             
-            # Stream the response tokens
-            for text in streaming_response.response_gen:
-                # Check for stop event if provided
+            # Stream results as they become available
+            last_index = 0
+            while True:
+                # Check for cancellation
                 if stop_event and stop_event.is_set():
-                    logger.info("Query streaming stopped by stop event")
+                    logger.info(f"Query {request_id} stopped by event")
                     return
                     
-                yield text
+                # Get any new tokens
+                new_tokens, complete, error = self.query_processor.get_tokens(request_id, last_index)
                 
-                # Small sleep to prevent overwhelming the client
-                await asyncio.sleep(0.01)
+                # Yield any new tokens
+                for token in new_tokens:
+                    yield token
+                    last_index += 1
+                    
+                    # Small sleep to prevent overwhelming the client
+                    await asyncio.sleep(0.01)
+                    
+                    # Check for stop again after yielding
+                    if stop_event and stop_event.is_set():
+                        logger.info(f"Query {request_id} stopped after token")
+                        return
                 
-                # Check for stop again after yielding
-                if stop_event and stop_event.is_set():
-                    logger.info("Query streaming stopped by stop event after chunk")
+                # If complete or error, we're done
+                if complete:
+                    # Store sources for future reference
+                    sources = self.query_processor.get_sources(request_id)
+                    if sources:
+                        self.last_sources = sources
+                    
+                    if error:
+                        logger.error(f"Error in query {request_id}: {error}")
+                        yield f"\nError: {error}"
                     return
+                    
+                # No new tokens yet, wait a bit before checking again
+                await asyncio.sleep(0.1)
                     
         except Exception as e:
-            error_msg = f"Error processing streaming query: {str(e)}"
+            error_msg = f"Error in stream_query: {str(e)}"
             logger.error(error_msg)
             logger.error(traceback.format_exc())
-            yield f"Error: {str(e)}"
+            yield f"\nError: {str(e)}"
     
     def format_response(self, response):
         """Format response with sources in a clean way"""

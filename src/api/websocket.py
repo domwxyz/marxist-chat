@@ -193,64 +193,31 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                     # Process the query with streaming
                     logger.info(f"Processing query with streaming: {query_text[:100]}...")
 
-                    try:
-                        # Create a streaming task that uses the stream_query method directly with date filters
-                        stream_task = asyncio.create_task(
-                            query_engine.stream_query(
-                                query_text, 
-                                stop_event, 
-                                start_date=start_date, 
-                                end_date=end_date
-                            ).__anext__()
-                        )
-                        active_queries[user_id] = stream_task
-                        
-                        # Stream tokens to the client in real-time
-                        full_response = ""
-                        
-                        async for token in query_engine.stream_query(
-                            query_text, 
-                            stop_event, 
-                            start_date=start_date, 
-                            end_date=end_date
-                        ):
-                            # Check if the query was stopped
-                            if stop_event.is_set():
-                                # Send a message indicating the query was stopped
-                                await websocket.send_json({
-                                    "type": "query_stopped",
-                                    "message": "Query was stopped by user request."
-                                })
-                                break
-                            
-                            # Accumulate the message for the stream_end event
-                            full_response += token
-                            
-                            # Send the token immediately to the frontend
+                    # Stream tokens to the client in real-time - the queue management happens internally
+                    full_response = ""
+                    
+                    async for token in query_engine.stream_query(
+                        query_text, 
+                        stop_event=stop_event, 
+                        start_date=start_date, 
+                        end_date=end_date
+                    ):
+                        # Check if the query was stopped
+                        if stop_event.is_set():
                             await websocket.send_json({
-                                "type": "stream_token",
-                                "data": token
+                                "type": "query_stopped",
+                                "message": "Query was stopped by user request."
                             })
+                            break
                         
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Query timeout for user {user_id}")
+                        # Accumulate the message for the stream_end event
+                        full_response += token
+                        
+                        # Send the token immediately to the frontend
                         await websocket.send_json({
-                            "type": "error",
-                            "message": "Query processing timed out. Please try a simpler query."
+                            "type": "stream_token",
+                            "data": token
                         })
-                        # Clean up resources
-                        if user_id in active_queries:
-                            del active_queries[user_id]
-                        if user_id in query_stop_events:
-                            del query_stop_events[user_id]
-                        continue
-                    except asyncio.CancelledError:
-                        logger.info(f"Query cancelled for user {user_id}")
-                        await websocket.send_json({
-                            "type": "query_stopped",
-                            "message": "Query was cancelled."
-                        })
-                        continue
                     
                     # End timing
                     elapsed_time = time.time() - start_time

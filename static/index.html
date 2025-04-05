@@ -435,39 +435,96 @@
             display: none !important;
         }
 
+        /* Queue-specific styles */
+        .queue-indicator {
+            background-color: #fff8e1;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .queue-indicator.critical {
+            background-color: #ffebee;
+            border-left-color: #f44336;
+        }
+
+        .queue-icon {
+            margin-right: 12px;
+            font-size: 20px;
+            min-width: 24px;
+            text-align: center;
+        }
+
+        .queue-text {
+            flex: 1;
+        }
+
+        .queue-position {
+            font-weight: bold;
+            margin-right: 12px;
+        }
+
+        .queue-progress {
+            height: 4px;
+            background-color: #f0f0f0;
+            width: 100%;
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .queue-progress-bar {
+            height: 100%;
+            background-color: #db1e1e;
+            width: 0;
+            transition: width 1s ease;
+        }
+
+        /* Improved typing indicator */
         .typing-indicator {
-            display: inline-block;
-            max-width: 80%;
-            box-sizing: border-box;
-            padding: 10px;
+            display: flex;
+            align-items: center;
             background-color: #f0f0f0;
             border-radius: 4px;
+            padding: 10px 15px;
             margin-bottom: 10px;
-            /* Remove absolute positioning */
-            position: relative;
-            /* Add to normal flow at bottom of chat */
-            align-self: flex-start;
-            /* Match bot message styling partially */
+            width: fit-content;
             border-left: 4px solid var(--primary-light);
         }
 
         .typing-indicator span {
-            display: inline-block;
-            width: 8px;
             height: 8px;
-            background-color: #888;
+            width: 8px;
+            float: left;
+            margin: 0 1px;
+            background-color: #9E9EA1;
+            display: block;
             border-radius: 50%;
-            margin-right: 5px;
-            animation: typing 1s infinite;
+            opacity: 0.4;
         }
 
-        .typing-indicator span:nth-child(2) {
-            animation-delay: 0.2s;
+        .typing-indicator span:nth-of-type(1) {
+            animation: 1s blink infinite 0.3333s;
         }
 
-        .typing-indicator span:nth-child(3) {
-            animation-delay: 0.4s;
-            margin-right: 0;
+        .typing-indicator span:nth-of-type(2) {
+            animation: 1s blink infinite 0.6666s;
+        }
+
+        .typing-indicator span:nth-of-type(3) {
+            animation: 1s blink infinite 0.9999s;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 1;
+            }
         }
 
         @keyframes typing {
@@ -536,6 +593,19 @@
                         <span id="status-text">Ready</span>
                     </div>
                 </div>
+
+                <div id="queue-indicator" class="queue-indicator hidden">
+                    <div class="queue-icon">⏱️</div>
+                    <div class="queue-text">
+                        <div>
+                            <span class="queue-position" id="queue-position">Position #2</span>
+                            <span id="queue-message">in line. Please wait...</span>
+                        </div>
+                        <div class="queue-progress">
+                            <div class="queue-progress-bar" id="queue-progress-bar"></div>
+                        </div>
+                    </div>
+                </div>
                 
                 <div class="chat-messages" id="chat-messages">
                     <div class="system-message">
@@ -573,6 +643,10 @@
             const statusIndicator = document.getElementById('status-indicator');
             const statusText = document.getElementById('status-text');
             const typingIndicator = document.getElementById('typing-indicator');
+            const queueIndicator = document.getElementById('queue-indicator');
+            const queuePositionEl = document.getElementById('queue-position');
+            const queueMessage = document.getElementById('queue-message');
+            const queueProgressBar = document.getElementById('queue-progress-bar');
 
             // Initialize variables
             let socket = null;
@@ -582,16 +656,16 @@
             let connectionTimeout = null;
             let isWaitingForResponse = false; // Track if we're waiting for a response
             let isConnecting = false;
+            let inQueue = false;
+            let queuePosition = 0;
+            let estimatedWaitTime = 0;
             const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
             const CONNECTION_TIMEOUT = 10 * 1000; // 10 seconds
             
             // Force hide typing indicator on page load
             document.addEventListener('DOMContentLoaded', function() {
                 optimizeForMobile();
-
-                hideTypingIndicator();
-                setupUserActivityTracking();
-                ensureChatInputAccessible();
+                initializeUI();
             });
 
             // Send message
@@ -622,6 +696,13 @@
                     sendMessage();
                 }
             });
+
+            function initializeUI() {
+                hideTypingIndicator();
+                hideQueueIndicator();
+                setupUserActivityTracking();
+                ensureChatInputAccessible();
+            }
 
             function isMobileDevice() {
                 return (window.innerWidth <= 480) || 
@@ -775,6 +856,8 @@
                         currentStreamElement = null;
                         hideTypingIndicator();
                         clearTimeout(connectionTimeout);
+                        inQueue = false;
+                        hideQueueIndicator();
                         
                         // Re-enable the send button
                         sendBtn.disabled = false;
@@ -798,6 +881,8 @@
                         isConnecting = false;
                         isWaitingForResponse = false;
                         hideTypingIndicator();
+                        inQueue = false;
+                        hideQueueIndicator();
                         
                         // Explicitly re-enable the send button when there's an error
                         sendBtn.disabled = false;
@@ -1017,9 +1102,20 @@
                         break;
                     
                     case 'queue':
-                        addSystemMessage(`${data.message}`);
+                        // Show queue indicator with position
+                        const position = data.position || 0;
+                        const waitMsg = data.message || `You are #${position} in queue. Please wait...`;
+                        const waitTime = Math.round((data.estimated_wait_time || position * 120) / 60);
+                        
+                        // Update queue indicator
+                        showQueueIndicator(position, waitMsg, waitTime);
+                        
                         // Still waiting if in queue
                         isWaitingForResponse = true;
+                        inQueue = true;
+                        
+                        // Show system message to explain the queue
+                        addSystemMessage(waitMsg);
                         break;
                     
                     case 'status':
@@ -1095,7 +1191,7 @@
                 }
                 
                 // Show or hide typing indicator based on response state
-                if (isWaitingForResponse) {
+                if (isWaitingForResponse && !inQueue) {
                     showTypingIndicator();
                 } else {
                     hideTypingIndicator();
@@ -1144,6 +1240,8 @@
 
                 // Force UI reset
                 hideTypingIndicator();
+                inQueue = false;
+                hideQueueIndicator();
                 stopBtn.classList.add('hidden');
                 
                 // Re-enable input and send button
@@ -1301,6 +1399,43 @@
                     // This ensures it doesn't affect the flow of messages
                     typingIndicator.parentNode.removeChild(typingIndicator);
                 }
+            }
+
+            function showQueueIndicator(position, message, waitTimeMinutes) {
+                queueIndicator.classList.remove('hidden');
+                
+                // Update position and message
+                queuePositionEl.textContent = `Position #${position}`;
+                if (message) {
+                    queueMessage.textContent = message.replace(/^You are #\d+ in queue\.?\s*/, '');
+                }
+                
+                // Update progress bar - higher position means less progress
+                const progress = Math.max(0, Math.min(100, (1 - (position / 10)) * 100));
+                queueProgressBar.style.width = `${progress}%`;
+                
+                // Highlight if wait time is long
+                if (waitTimeMinutes > 5) {
+                    queueIndicator.classList.add('critical');
+                } else {
+                    queueIndicator.classList.remove('critical');
+                }
+                
+                // Store queue state
+                inQueue = true;
+                queuePosition = position;
+                estimatedWaitTime = waitTimeMinutes * 60; // Convert to seconds
+                
+                // Make sure the indicator is visible (and scroll if needed)
+                queueIndicator.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            // Hide queue indicator
+            function hideQueueIndicator() {
+                queueIndicator.classList.add('hidden');
+                inQueue = false;
+                queuePosition = 0;
+                estimatedWaitTime = 0;
             }
             
             // Additional function to call when stream ends

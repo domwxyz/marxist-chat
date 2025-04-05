@@ -32,8 +32,9 @@ CURRENT_EMBED = os.getenv("CURRENT_EMBED", BGE_M3)  # Default embedding model
 
 # LLM models - listed smallest to largest (2GB-5GB-9GB in download size)
 QWEN_SMALL = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+QWEN_MED = "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
 QWEN_LARGE = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-CURRENT_LLM = os.getenv("CURRENT_LLM", QWEN_SMALL)  # Default LLM model
+CURRENT_LLM = os.getenv("CURRENT_LLM", QWEN_MED)  # Default LLM model
 
 # LLM configuration
 NUM_THREADS = int(os.getenv("NUM_THREADS", 1))  # Default thread count for LLM inference

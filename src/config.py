@@ -31,12 +31,13 @@ GTE_SMALL = "thenlper/gte-small"
 CURRENT_EMBED = os.getenv("CURRENT_EMBED", BGE_M3)  # Default embedding model
 
 # LLM models - listed smallest to largest (2GB-5GB-9GB in download size)
-QWEN_SMALL = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
-QWEN_LARGE = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
-CURRENT_LLM = os.getenv("CURRENT_LLM", QWEN_SMALL)  # Default LLM model
+QWEN2_5_3B = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
+QWEN2_5_7B = "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-1M-GGUF/resolve/main/Qwen2.5-7B-Instruct-1M-Q4_K_M.gguf"
+QWEN2_5_14B = "https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-1M-GGUF/resolve/main/Qwen2.5-14B-Instruct-1M-Q4_K_M.gguf"
+CURRENT_LLM = os.getenv("CURRENT_LLM", QWEN2_5_3B)  # Default LLM model
 
 # LLM configuration
-NUM_THREADS = int(os.getenv("NUM_THREADS", 1))  # Default thread count for LLM inference
+NUM_THREADS = int(os.getenv("NUM_THREADS", 4))  # Default thread count for LLM inference
 TEMPERATURE = float(os.getenv("TEMPERATURE", 0.2))  # Default temperature for responses
 
 # System prompt for LLM
@@ -65,8 +66,7 @@ ALWAYS:
 HOST = os.getenv("HOST", "0.0.0.0")  # Listen on all interfaces
 PORT = int(os.getenv("PORT", 8000))  # Default port
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"  # Debug mode
-MAX_CONCURRENT_USERS = int(os.getenv("MAX_CONCURRENT_USERS", 3))  # Maximum number of concurrent WebSocket connections
-MODEL_POOL_SIZE = int(os.getenv("MODEL_POOL_SIZE", 3))
+MAX_CONCURRENT_USERS = int(os.getenv("MAX_CONCURRENT_USERS", 30))  # Maximum number of concurrent WebSocket connections
 QUEUE_TIMEOUT = int(os.getenv("QUEUE_TIMEOUT", 300))  # Seconds a user can stay in queue before timing out (5 minutes)
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 120))  # Seconds to wait for a response before timing out (2 minutes)
 

@@ -16,19 +16,20 @@ RUN apt-get update && \
 # Set environment variables for llama-cpp-python build
 ENV CMAKE_ARGS="-DLLAMA_CUBLAS=OFF" 
 ENV FORCE_CMAKE=1
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 
+ENV PIP_NO_CACHE_DIR=1
 
-# Copy requirements and install LLM-specific dependencies
+# Copy requirements file
 COPY requirements.txt .
 
-# Install PyTorch first
-RUN pip install --no-cache-dir torch==2.0.1 --index-url https://download.pytorch.org/whl/cpu
+# Install base requirements
+RUN pip install -r requirements.txt
 
-# Install transformers with specific version first
-RUN pip install --no-cache-dir transformers==4.33.2
-
-# Install the rest of the requirements
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir fastapi uvicorn llama-index-core llama-index-llms-llama-cpp
+# Install llama-index and related packages with specific compatible versions
+RUN pip install llama-index-core==0.10.11 
+RUN pip install llama-index-llms-llama-cpp==0.1.1
+RUN pip install llama-index-embeddings-huggingface==0.1.5
+RUN pip install llama-index-vector-stores-chroma==0.1.1
 
 # Create necessary directories
 RUN mkdir -p models vector_store logs

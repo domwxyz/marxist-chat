@@ -250,4 +250,111 @@ class LLMManager:
             """Async version of complete - required by newer llama-index"""
             # Use synchronous version since we don't have async requests
             return self.complete(prompt, **kwargs)
+
+        async def achat(self, messages, **kwargs):
+            """Async chat method"""
+            # Simple implementation to convert chat to completion
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            return await self.acomplete(prompt, **kwargs)
+
+        async def astream_chat(self, messages, **kwargs):
+            """Async streaming chat method"""
+            # Convert messages to a prompt
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            async for token in self.astream_complete(prompt, **kwargs):
+                yield token
+
+        async def astream_complete(self, prompt, **kwargs):
+            """Async streaming completion method"""
+            try:
+                # Create a unique request ID
+                request_id = f"stream_{int(time.time())}"
+                
+                # Use aiohttp to make async requests
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self.query_url,
+                        json={
+                            "query_text": prompt,
+                            "request_id": request_id
+                        },
+                        timeout=300  # 5 minute timeout
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise Exception(f"LLM service error: {response.status}, {error_text}")
+                        
+                        # Stream the response
+                        async for line in response.content:
+                            line = line.decode('utf-8').strip()
+                            if not line:
+                                continue
+                            
+                            data = json.loads(line)
+                            if "token" in data:
+                                yield data["token"]
+            except Exception as e:
+                logger.error(f"Error in astream_complete: {e}")
+                raise
+
+        def metadata(self):
+            """Get metadata about the model"""
+            try:
+                # Use the status endpoint to get information about the model
+                response = requests.get(self.status_url, timeout=5)
+                if response.status_code == 200:
+                    status_data = response.json()
+                    # Extract model info from status
+                    model_info = status_data.get("model_info", {})
+                    return model_info
+                else:
+                    return {
+                        "status": "error",
+                        "code": response.status_code,
+                        "message": "Failed to get model metadata"
+                    }
+            except Exception as e:
+                logger.error(f"Error getting model metadata: {e}")
+                return {
+                    "status": "error",
+                    "message": str(e)
+                }
+
+        def stream_chat(self, messages, **kwargs):
+            """Streaming chat method"""
+            # Convert messages to a prompt
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            for token in self.stream_complete(prompt, **kwargs):
+                yield token
+
+        def stream_complete(self, prompt, **kwargs):
+            """Streaming completion method"""
+            try:
+                # Create a unique request ID
+                request_id = f"stream_{int(time.time())}"
+                
+                # Make a request to the LLM service
+                response = requests.post(
+                    self.query_url,
+                    json={
+                        "query_text": prompt,
+                        "request_id": request_id
+                    },
+                    stream=True,
+                    timeout=300  # 5 minute timeout
+                )
+                
+                if response.status_code != 200:
+                    raise Exception(f"LLM service error: {response.status_code}")
+                
+                # Stream the response
+                for line in response.iter_lines():
+                    if line:
+                        data = json.loads(line.decode('utf-8'))
+                        if "token" in data:
+                            yield data["token"]
+            except Exception as e:
+                logger.error(f"Error in stream_complete: {e}")
+                raise
             

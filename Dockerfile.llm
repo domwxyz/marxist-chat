@@ -28,7 +28,7 @@ RUN mkdir -p models vector_store logs
 # Download model (cached in models directory)
 RUN mkdir -p /app/models && \
     cd /app/models && \
-    MODEL_URL=${CURRENT_LLM:-"https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"} && \
+    MODEL_URL=${CURRENT_LLM:-"https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"} && \
     MODEL_FILENAME=$(basename $MODEL_URL) && \
     if [ ! -f "$MODEL_FILENAME" ]; then \
         echo "Downloading model $MODEL_URL"; \

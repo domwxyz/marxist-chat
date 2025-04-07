@@ -5,9 +5,9 @@ import functools
 import traceback
 import requests
 import os
-from typing import Optional, Callable, Any, Dict
+from typing import Any, Dict, List, Optional, Callable
 
-from llama_index.core.llms import LLM, CompletionResponse, CompletionResponseGen
+from llama_index.core.llms import LLM, ChatMessage, CompletionResponse, CompletionResponseGen, LLMMetadata
 from llama_index.llms.llama_cpp import LlamaCPP
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import config

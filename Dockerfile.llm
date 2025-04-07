@@ -19,14 +19,6 @@ ENV FORCE_CMAKE=1
 
 # Copy requirements and install LLM-specific dependencies
 COPY requirements.txt .
-
-# Install PyTorch first
-RUN pip install --no-cache-dir torch==2.0.1 --index-url https://download.pytorch.org/whl/cpu
-
-# Install transformers with specific version first
-RUN pip install --no-cache-dir transformers==4.33.2
-
-# Install the rest of the requirements
 RUN pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir fastapi uvicorn llama-index-core llama-index-llms-llama-cpp
 

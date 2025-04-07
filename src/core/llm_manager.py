@@ -112,70 +112,25 @@ class LLMManager:
     @staticmethod
     @retry_with_exponential_backoff(max_retries=3, initial_delay=1.0)
     def initialize_embedding_model(model_name=None):
-        """Initialize the embedding model with retry mechanism and fallbacks"""
+        """Initialize the embedding model with retry mechanism"""
         model_name = model_name or config.CURRENT_EMBED
         
         logger.info(f"Initializing embedding model: {model_name}")
         
         try:
-            # First try the selected model
-            try:
-                # Set additional kwargs to handle incompatibilities
-                embed_model = HuggingFaceEmbedding(
-                    model_name=model_name,
-                    max_length=512,
-                    embed_batch_size=32,
-                    trust_remote_code=True
-                )
-                logger.info("Embedding model initialization successful")
-                return embed_model
-            except Exception as e:
-                # Log first attempt error but try fallback
-                logger.warning(f"Error with primary embedding model ({model_name}): {e}")
-                
-                # First fallback option - try a different model
-                fallback_model = "all-MiniLM-L6-v2"
-                logger.info(f"Trying fallback embedding model: {fallback_model}")
-                
-                embed_model = HuggingFaceEmbedding(
-                    model_name=fallback_model,
-                    max_length=512,
-                    embed_batch_size=32,
-                    trust_remote_code=True
-                )
-                
-                logger.info(f"Fallback embedding model initialization successful: {fallback_model}")
-                return embed_model
+            embed_model = HuggingFaceEmbedding(
+                model_name=model_name,
+                max_length=512,
+                embed_batch_size=32
+            )
+            
+            logger.info("Embedding model initialization successful")
+            return embed_model
             
         except Exception as e:
             logger.error(f"Error initializing embedding model: {str(e)}")
             logger.error(traceback.format_exc())
-            
-            # Last resort - try a minimal fallback
-            try:
-                logger.info("Trying minimal fallback embedding approach")
-                
-                # Import directly to modify parameters
-                from llama_index.embeddings.huggingface import DEFAULT_HUGGINGFACE_EMBEDDING_MODEL
-                from llama_index.core.embeddings import BaseEmbedding
-                
-                # Create a very simple embedding model that won't rely on complex transformers loading
-                class MinimalEmbedding(BaseEmbedding):
-                    def _get_text_embedding(self, text: str) -> list:
-                        # Extremely simple embedding - just use character counts as features
-                        # This is not good for production but allows the system to function
-                        features = [0] * 384  # Common embedding size
-                        for i, char in enumerate(text[:384]):
-                            features[i % 384] = ord(char) / 255.0
-                        return features
-                    
-                    def _get_text_embeddings(self, texts: list) -> list:
-                        return [self._get_text_embedding(text) for text in texts]
-                
-                return MinimalEmbedding()
-            except Exception as e2:
-                logger.error(f"Error creating minimal fallback embedding: {e2}")
-                raise e  # Raise the original error
+            raise
     
     @staticmethod
     def is_model_loaded(model):

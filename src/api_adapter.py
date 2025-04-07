@@ -9,7 +9,7 @@ import requests
 from typing import Dict, List, Any, Optional
 
 import redis
-import aioredis
+from redis.asyncio import Redis as AsyncRedis  # Updated import for async Redis
 import uvicorn
 from fastapi import FastAPI, WebSocket, HTTPException
 
@@ -74,9 +74,11 @@ async def initialize_redis():
     # Standard Redis client for synchronous operations
     redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
     
-    # aioredis client for async operations 
-    aioredis_client = await aioredis.create_redis_pool(
-        f"redis://{REDIS_HOST}:{REDIS_PORT}", 
+    # Updated: Use the new aioredis API
+    aioredis_client = AsyncRedis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        decode_responses=True,
         encoding="utf-8"
     )
     
@@ -106,8 +108,7 @@ async def shutdown_event():
     
     # Close Redis connections
     if aioredis_client:
-        aioredis_client.close()
-        await aioredis_client.wait_closed()
+        await aioredis_client.close()
     
     if redis_client:
         redis_client.delete(f"api:instance:{API_ID}")

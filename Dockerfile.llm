@@ -20,7 +20,12 @@ ENV FORCE_CMAKE=1
 # Copy requirements and install LLM-specific dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir fastapi uvicorn llama-index-core llama-index-llms-llama-cpp
+    pip install --no-cache-dir fastapi uvicorn llama-index-core llama-index-llms-llama-cpp && \
+    # Clean up cache to save space
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* && \
+    # Clean pip cache
+    rm -rf /root/.cache/pip
 
 # Create necessary directories
 RUN mkdir -p models vector_store logs

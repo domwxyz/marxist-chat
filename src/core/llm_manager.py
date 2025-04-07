@@ -186,35 +186,27 @@ class LLMManager:
         """Wrapper for remote LLM service that properly implements the LLM interface"""
         
         def __init__(self, service_url):
-            self.service_url = service_url
-            self.health_url = f"{service_url}/health"
-            self.status_url = f"{service_url}/status"
-            self.query_url = f"{service_url}/query"
+            """Initialize with service URL"""
+            # Use underscore prefix for attributes to avoid Pydantic validation
+            self._service_url = service_url
+            self._health_url = f"{service_url}/health"
+            self._status_url = f"{service_url}/status"
+            self._query_url = f"{service_url}/query"
             logger.info(f"Initialized RemoteLLM with service URL: {service_url}")
         
-        def is_healthy(self):
-            """Check if the remote LLM service is healthy"""
-            try:
-                response = requests.get(self.health_url, timeout=5)
-                return response.status_code == 200
-            except Exception:
-                return False
-
-        def get_status(self):
-            """Get status information from the remote LLM service"""
-            try:
-                response = requests.get(self.status_url, timeout=5)
-                if response.status_code == 200:
-                    return response.json()
-                return {"status": "error", "code": response.status_code}
-            except Exception as e:
-                return {"status": "error", "message": str(e)}
+        @property
+        def metadata(self):
+            """Get metadata about the model - implement as property"""
+            return {
+                "model_name": "Remote LLM Service",
+                "service_url": self._service_url,
+            }
         
         def complete(self, prompt, **kwargs):
-            """Complete a prompt using the remote LLM service - implements LLM interface"""
+            """Complete a prompt using the remote LLM service"""
             try:
                 response = requests.post(
-                    self.query_url,
+                    self._query_url,
                     json={
                         "query_text": prompt,
                         "request_id": f"direct_{int(time.time())}"
@@ -238,96 +230,7 @@ class LLMManager:
             except Exception as e:
                 logger.error(f"Error in RemoteLLM.complete: {e}")
                 raise
-                
-        # For newer llama-index versions, implement these methods too
-        def chat(self, messages, **kwargs):
-            """Chat method - just convert messages to a prompt and complete"""
-            # Simple implementation to convert chat to completion
-            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
-            return self.complete(prompt, **kwargs)
-                
-        async def acomplete(self, prompt, **kwargs):
-            """Async version of complete - required by newer llama-index"""
-            # Use synchronous version since we don't have async requests
-            return self.complete(prompt, **kwargs)
-
-        async def achat(self, messages, **kwargs):
-            """Async chat method"""
-            # Simple implementation to convert chat to completion
-            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
-            return await self.acomplete(prompt, **kwargs)
-
-        async def astream_chat(self, messages, **kwargs):
-            """Async streaming chat method"""
-            # Convert messages to a prompt
-            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
-            async for token in self.astream_complete(prompt, **kwargs):
-                yield token
-
-        async def astream_complete(self, prompt, **kwargs):
-            """Async streaming completion method"""
-            try:
-                # Create a unique request ID
-                request_id = f"stream_{int(time.time())}"
-                
-                # Use aiohttp to make async requests
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self.query_url,
-                        json={
-                            "query_text": prompt,
-                            "request_id": request_id
-                        },
-                        timeout=300  # 5 minute timeout
-                    ) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
-                            raise Exception(f"LLM service error: {response.status}, {error_text}")
-                        
-                        # Stream the response
-                        async for line in response.content:
-                            line = line.decode('utf-8').strip()
-                            if not line:
-                                continue
-                            
-                            data = json.loads(line)
-                            if "token" in data:
-                                yield data["token"]
-            except Exception as e:
-                logger.error(f"Error in astream_complete: {e}")
-                raise
-
-        def metadata(self):
-            """Get metadata about the model"""
-            try:
-                # Use the status endpoint to get information about the model
-                response = requests.get(self.status_url, timeout=5)
-                if response.status_code == 200:
-                    status_data = response.json()
-                    # Extract model info from status
-                    model_info = status_data.get("model_info", {})
-                    return model_info
-                else:
-                    return {
-                        "status": "error",
-                        "code": response.status_code,
-                        "message": "Failed to get model metadata"
-                    }
-            except Exception as e:
-                logger.error(f"Error getting model metadata: {e}")
-                return {
-                    "status": "error",
-                    "message": str(e)
-                }
-
-        def stream_chat(self, messages, **kwargs):
-            """Streaming chat method"""
-            # Convert messages to a prompt
-            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
-            for token in self.stream_complete(prompt, **kwargs):
-                yield token
-
+        
         def stream_complete(self, prompt, **kwargs):
             """Streaming completion method"""
             try:
@@ -336,7 +239,7 @@ class LLMManager:
                 
                 # Make a request to the LLM service
                 response = requests.post(
-                    self.query_url,
+                    self._query_url,
                     json={
                         "query_text": prompt,
                         "request_id": request_id
@@ -357,4 +260,63 @@ class LLMManager:
             except Exception as e:
                 logger.error(f"Error in stream_complete: {e}")
                 raise
+        
+        def chat(self, messages, **kwargs):
+            """Chat method - convert messages to a prompt and complete"""
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            return self.complete(prompt, **kwargs)
+        
+        def stream_chat(self, messages, **kwargs):
+            """Streaming chat method"""
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            for token in self.stream_complete(prompt, **kwargs):
+                yield token
+        
+        async def acomplete(self, prompt, **kwargs):
+            """Async completion method"""
+            return self.complete(prompt, **kwargs)
+        
+        async def astream_complete(self, prompt, **kwargs):
+            """Async streaming completion method"""
+            try:
+                request_id = f"stream_{int(time.time())}"
+                
+                # Use aiohttp for async requests
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(
+                        self._query_url,
+                        json={
+                            "query_text": prompt,
+                            "request_id": request_id
+                        },
+                        timeout=300
+                    ) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            raise Exception(f"LLM service error: {response.status}, {error_text}")
+                        
+                        # Stream the response
+                        async for line in response.content:
+                            line = line.decode('utf-8').strip()
+                            if not line:
+                                continue
+                            
+                            data = json.loads(line)
+                            if "token" in data:
+                                yield data["token"]
+            except Exception as e:
+                logger.error(f"Error in astream_complete: {e}")
+                raise
+        
+        async def achat(self, messages, **kwargs):
+            """Async chat method"""
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            return await self.acomplete(prompt, **kwargs)
+        
+        async def astream_chat(self, messages, **kwargs):
+            """Async streaming chat method"""
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            async for token in self.astream_complete(prompt, **kwargs):
+                yield token
             

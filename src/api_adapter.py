@@ -13,9 +13,6 @@ import aioredis
 import uvicorn
 from fastapi import FastAPI, WebSocket, HTTPException
 
-# Add the project root to the path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -29,10 +26,11 @@ logger = logging.getLogger("api_service")
 
 # Import your existing API modules
 try:
-    from src.api.router import router
-    from src.api.exceptions import setup_exception_handlers
-    from src.api.middleware import MetricsMiddleware, metrics_collector
-    from src.api.metrics_endpoints import metrics_router, start_metrics_collector
+    from api.router import router
+    from api.exceptions import setup_exception_handlers
+    from api.middleware import MetricsMiddleware, metrics_collector
+    from api.metrics_endpoints import metrics_router, start_metrics_collector
+    from utils.logging_setup import setup_logging
 except ImportError as e:
     logger.error(f"Failed to import API modules: {e}")
     raise

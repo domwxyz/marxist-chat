@@ -12,7 +12,7 @@ elif [ "${SERVICE_TYPE}" = "llm" ]; then
   curl -f http://localhost:${PORT:-5000}/health || exit 1
 else
   # Default healthcheck
-  if [ -f /app/api_adapter.py ]; then
+  if [ -f /app/src/api_adapter.py ]; then
     curl -f http://localhost:${PORT:-8000}/api/v1/healthcheck || exit 1
   else
     curl -f http://localhost:${PORT:-5000}/health || exit 1

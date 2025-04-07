@@ -23,12 +23,9 @@ RUN mkdir -p posts_cache vector_store logs static
 # Copy application code
 COPY . .
 
-# Add the new API adapter file that we'll create
-COPY api_adapter.py .
-
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/healthcheck || exit 1
 
 # Entry point
-CMD ["python", "api_adapter.py"]
+CMD ["python", "src/api_adapter.py"]

@@ -40,12 +40,9 @@ RUN mkdir -p /app/models && \
 # Copy application code
 COPY . .
 
-# Add the LLM service wrapper
-COPY llm_service.py .
-
 # Add health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
 # Entry point
-CMD ["python", "llm_service.py"]
+CMD ["python", "src/llm_service.py"]

@@ -23,7 +23,7 @@ if [ "${SERVICE_TYPE}" = "api" ]; then
   export DISTRIBUTED_MODE=true
   
   # Start API service
-  python api_adapter.py
+  python src/api_adapter.py
   
 elif [ "${SERVICE_TYPE}" = "llm" ]; then
   echo "Starting LLM service..."
@@ -42,7 +42,7 @@ elif [ "${SERVICE_TYPE}" = "llm" ]; then
   export LOCAL_MODEL_PATH="${MODEL_PATH}"
   
   # Start LLM service
-  python llm_service.py
+  python src/llm_service.py
   
 else
   echo "No service type specified. Starting in auto-detect mode..."
@@ -50,11 +50,11 @@ else
   # Check if running in a Docker environment
   if [ -f /.dockerenv ]; then
     # Auto-detect based on installed files
-    if [ -f /app/api_adapter.py ]; then
+    if [ -f /app/src/api_adapter.py ]; then
       echo "Detected API service."
       export SERVICE_TYPE=api
       exec $0
-    elif [ -f /app/llm_service.py ]; then
+    elif [ -f /app/src/llm_service.py ]; then
       echo "Detected LLM service."
       export SERVICE_TYPE=llm
       exec $0

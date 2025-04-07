@@ -26,7 +26,6 @@ logging.basicConfig(
 logger = logging.getLogger("llm_service")
 
 # Import your existing core code
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     from core.llm_manager import LLMManager
     from core.vector_store import VectorStoreManager

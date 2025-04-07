@@ -1,4 +1,5 @@
 import os
+import socket
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -30,7 +31,7 @@ BGE_M3 = "BAAI/bge-m3"
 GTE_SMALL = "thenlper/gte-small"
 CURRENT_EMBED = os.getenv("CURRENT_EMBED", BGE_M3)  # Default embedding model
 
-# LLM models - listed smallest to largest (2GB-5GB-9GB in download size)
+# LLM models - listed smallest to largest
 QWEN_SMALL = "https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
 QWEN_MED = "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
 QWEN_LARGE = "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"
@@ -70,6 +71,18 @@ MAX_CONCURRENT_USERS = int(os.getenv("MAX_CONCURRENT_USERS", 3))  # Maximum numb
 MODEL_POOL_SIZE = int(os.getenv("MODEL_POOL_SIZE", 3))
 QUEUE_TIMEOUT = int(os.getenv("QUEUE_TIMEOUT", 300))  # Seconds a user can stay in queue before timing out (5 minutes)
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", 120))  # Seconds to wait for a response before timing out (2 minutes)
+
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+
+LLM_SERVICE_URL = os.getenv("LLM_SERVICE_URL", "http://llm:5000")
+API_ID = os.getenv("API_ID", socket.gethostname())
+
+MODELS_DIR = Path(os.getenv("MODELS_DIR", PARENT_DIR / "models"))
+MODELS_DIR.mkdir(exist_ok=True, parents=True)
+LOCAL_MODEL_PATH = MODELS_DIR / os.path.basename(CURRENT_LLM)
+
+DISTRIBUTED_MODE = os.getenv("DISTRIBUTED_MODE", "True").lower() == "true"
 
 # Logging configuration
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

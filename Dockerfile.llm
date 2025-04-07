@@ -1,0 +1,51 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies including those needed for llama-cpp-python
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    cmake \
+    curl \
+    git \
+    python3-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set environment variables for llama-cpp-python build
+ENV CMAKE_ARGS="-DLLAMA_CUBLAS=OFF" 
+ENV FORCE_CMAKE=1
+
+# Copy requirements and install LLM-specific dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir fastapi uvicorn llama-index-core llama-index-llms-llama-cpp
+
+# Create necessary directories
+RUN mkdir -p models vector_store logs
+
+# Download model (cached in models directory)
+RUN mkdir -p /app/models && \
+    cd /app/models && \
+    MODEL_URL=${CURRENT_LLM:-"https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf"} && \
+    MODEL_FILENAME=$(basename $MODEL_URL) && \
+    if [ ! -f "$MODEL_FILENAME" ]; then \
+        echo "Downloading model $MODEL_URL"; \
+        curl -L -o "$MODEL_FILENAME" "$MODEL_URL"; \
+    else \
+        echo "Model already exists: $MODEL_FILENAME"; \
+    fi
+
+# Copy application code
+COPY . .
+
+# Add the LLM service wrapper
+COPY llm_service.py .
+
+# Add health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Entry point
+CMD ["python", "llm_service.py"]

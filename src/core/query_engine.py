@@ -1,4 +1,7 @@
 import asyncio
+import aiohttp
+import json
+import requests
 from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 from types import SimpleNamespace
 import html
@@ -20,6 +23,7 @@ import config
 from core.vector_store import VectorStoreManager
 from core.llm_manager import LLMManager
 from core.metadata_repository import MetadataRepository
+from utils.redis_helper import RedisHelper
 
 logger = logging.getLogger("core.query_engine")
 
@@ -257,6 +261,12 @@ class QueryEngine:
     
     async def stream_query(self, query_text: str, stop_event: Optional[asyncio.Event] = None, start_date=None, end_date=None) -> AsyncGenerator[str, None]:
         """Process a query and stream response asynchronously with efficient concurrency"""
+
+        if config.DISTRIBUTED_MODE:
+            async for token in self.stream_query_distributed(query_text, stop_event, start_date, end_date):
+                yield token
+            return
+
         if not hasattr(self, 'query_processor') or not self.query_processor:
             raise ValueError("Query processor not initialized")
         
@@ -313,6 +323,84 @@ class QueryEngine:
         except Exception as e:
             error_msg = f"Error in stream_query: {str(e)}"
             logger.error(error_msg)
+            logger.error(traceback.format_exc())
+            yield f"\nError: {str(e)}"
+
+    async def stream_query_distributed(self, query_text: str, stop_event: Optional[asyncio.Event] = None, start_date=None, end_date=None) -> AsyncGenerator[str, None]:
+        """Process a query with the remote LLM service and stream the response asynchronously"""
+        if stop_event is None:
+            stop_event = asyncio.Event()
+        
+        # Create a unique request ID
+        request_id = f"req_{uuid.uuid4().hex}"
+        logger.info(f"Streaming query via LLM service: {request_id}")
+        
+        try:
+            # Prepare the API request
+            url = f"{config.LLM_SERVICE_URL}/query"
+            payload = {
+                "query_text": query_text,
+                "request_id": request_id,
+                "start_date": start_date,
+                "end_date": end_date
+            }
+            
+            # Create a persistent session for streaming
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload, timeout=300) as response:
+                    if response.status != 200:
+                        error_text = await response.text()
+                        logger.error(f"LLM service error: {response.status}, {error_text}")
+                        yield f"Error from LLM service: {response.status}"
+                        return
+                    
+                    # Process the streaming response
+                    async for line in response.content:
+                        # Check if the query was stopped
+                        if stop_event.is_set():
+                            # Send stop request to LLM service
+                            try:
+                                await session.post(
+                                    f"{config.LLM_SERVICE_URL}/stop",
+                                    json={"request_id": request_id}
+                                )
+                            except Exception as e:
+                                logger.error(f"Error sending stop request: {e}")
+                            return
+                        
+                        try:
+                            line = line.decode('utf-8').strip()
+                            if not line:
+                                continue
+                                
+                            data = json.loads(line)
+                            
+                            # Extract and yield tokens
+                            if "token" in data:
+                                yield data["token"]
+                            elif "sources" in data:
+                                # Store sources for later retrieval
+                                self.last_sources = data["sources"]
+                            elif "error" in data:
+                                logger.error(f"Error from LLM service: {data['error']}")
+                                yield f"\nError: {data['error']}"
+                                return
+                            elif "status" in data and data["status"] == "stopped":
+                                logger.info(f"Query {request_id} was stopped")
+                                return
+                        except json.JSONDecodeError:
+                            logger.warning(f"Invalid JSON from LLM service: {line}")
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error processing streaming response: {e}")
+                            yield f"\nError processing response: {str(e)}"
+                            return
+        
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout in stream_query_distributed for request {request_id}")
+            yield "\nError: Request timed out"
+        except Exception as e:
+            logger.error(f"Error in stream_query_distributed: {e}")
             logger.error(traceback.format_exc())
             yield f"\nError: {str(e)}"
     

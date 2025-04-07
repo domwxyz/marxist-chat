@@ -1,46 +1,139 @@
 # Marxist Chat
 
-A RAG (Retrieval Augmented Generation) chatbot built to interact with content from multiple communist theory sources. The application indexes articles from RSS feeds including communistusa.org and marxist.com, creating a searchable vector database that powers contextual responses to user queries.
+A distributed RAG (Retrieval Augmented Generation) chatbot built to interact with content from multiple communist theory sources. The application indexes articles from RSS feeds including communistusa.org and marxist.com, creating a searchable vector database that powers contextual responses to user queries.
 
 ## Core Functionality
 
 - **Multi-Source Article Collection**: Downloads and processes articles from multiple RSS feeds with pagination support
 - **Vector Database**: Creates and incrementally updates searchable embeddings of document content
 - **Metadata Repository**: Efficiently tracks and manages document metadata for improved retrieval
+- **Distributed Architecture**: Supports horizontal scaling with multiple LLM instances
+- **Load Balancing**: Efficiently distributes requests across multiple service instances
 - **Chat Interfaces**: Provides both command-line and web-based conversation options
 - **Real-time Response Streaming**: Delivers token-by-token responses for better user experience
 - **Source Attribution**: Cites specific articles used to generate each response
+
+## Architecture
+
+Marxist Chat is built as a distributed system with the following components:
+
+```
+                   ┌─────────────────┐
+                   │                 │
+Users ────────────▶│  Nginx Proxy    │
+                   │  (Load Balancer)│
+                   │                 │
+                   └────────┬────────┘
+                            │
+                            ▼
+         ┌──────────────────────────────────┐
+         │                                  │
+         ▼                                  ▼
+┌─────────────────┐               ┌─────────────────┐
+│  API Container 1│               │  API Container 2│
+│ (Queue Manager  │               │ (Queue Manager  │
+│  & WebSockets)  │               │  & WebSockets)  │
+└────────┬────────┘               └────────┬────────┘
+         │                                  │
+         ▼                                  ▼
+┌─────────────────┐               ┌─────────────────┐
+│  LLM Container 1│               │  LLM Container 2│
+│  (Qwen LLM)     │               │  (Qwen LLM)     │
+└─────────────────┘               └─────────────────┘
+```
+
+- **API Service**: Handles WebSockets, user connections, and queuing
+- **LLM Service**: Dedicated to running LlamaCPP inference
+- **Redis**: Centralized state management and cross-instance communication
+- **Nginx**: Load balancing and request routing
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.8 or newer
-- 2-10GB disk space for models (depending on model selection)
-- 4GB+ RAM recommended
-
-### Basic Installation
-
-```bash
-git clone https://github.com/yourusername/marxist-chat.git
-cd marxist-chat
-pip install -r requirements.txt
-cp .env.example .env
-# Edit .env with your preferred settings
-```
+- Docker and Docker Compose
+- 4GB+ RAM (8GB recommended for multiple instances)
+- 2-4 vCPU recommended
+- 5GB+ disk space for models and vector store
 
 ### Docker Installation
 
 ```bash
-docker build -t marxist-chat .
-docker run -p 8000:8000 -v ./posts_cache:/app/posts_cache -v ./vector_store:/app/vector_store -v ./logs:/app/logs marxist-chat
+# Clone the repository
+git clone https://github.com/yourusername/marxist-chat.git
+cd marxist-chat
+
+# Initialize the environment
+chmod +x initialize.sh
+./initialize.sh
+
+# Start the services
+docker-compose up -d
 ```
+
+### Scaling the Deployment
+
+To scale the number of API or LLM instances:
+
+```bash
+# Scale to 3 API instances and 2 LLM instances
+docker-compose up -d --scale api=3 --scale llm=2
+```
+
+## Configuration
+
+The system can be configured through the `.env` file or via environment variables.
+
+### Key Configuration Options
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| HOST | Server hostname | 0.0.0.0 |
+| PORT | Server port | 8000 |
+| MAX_CONCURRENT_USERS | Maximum concurrent users | 30 |
+| CURRENT_LLM | URL to LLM model | Qwen2.5-1.5B-Instruct GGUF |
+| CURRENT_EMBED | Embedding model name | BAAI/bge-m3 |
+| NUM_THREADS | Number of threads for LLM inference | 2 |
+| DISTRIBUTED_MODE | Enable distributed architecture | true |
+| REDIS_HOST | Redis server hostname | redis |
+| REDIS_PORT | Redis server port | 6379 |
+
+### RSS Feed Configuration
+
+The application supports multiple feed sources with different pagination types:
+
+```python
+RSS_FEED_CONFIG = [
+    {"url": "https://communistusa.org/feed", "pagination_type": "wordpress"},
+    {"url": "https://marxist.com/index.php?format=feed", "pagination_type": "joomla", "limit_increment": 5},
+    {"url": "https://communist.red/feed", "pagination_type": "wordpress"},
+    # Add more feeds with appropriate pagination_type and settings
+]
+```
+
+### Models
+
+#### Chat Models (smallest to largest):
+- **Qwen 2.5 1.5B** (Default) - ~2GB download
+- **Qwen 2.5 3B** - ~3GB download
+- **Qwen 2.5 7B** - ~5GB download
+- **Qwen 2.5 14B** - ~9GB download
+
+#### Embedding Models:
+- **BGE-M3** (Default)
+- **GTE-Small**
 
 ## Usage
 
-### CLI Mode
+### Setup via CLI
+
+Once the containers are running, you can set up the RSS archive and vector store using the CLI:
 
 ```bash
+# Connect to an API container
+docker-compose exec api1 bash
+
+# Run the CLI for first-time setup
 python src/main.py
 ```
 
@@ -56,82 +149,69 @@ Menu options:
 9. **Rebuild Metadata Index** - Refresh metadata repository
 10. **Update Vector Store** - Add new articles without rebuilding
 
-### Web Server Mode
+### Web Interface
 
-```bash
-python src/app.py
+Access the web interface at http://localhost:8000 (or your configured domain)
+
+## Directory Structure
+
 ```
-
-Access the web interface at http://localhost:8000
-
-## Configuration
-
-The system can be configured through the `.env` file or via the CLI configuration menu.
-
-### RSS Feed Configuration
-
-The application now supports multiple feed sources with different pagination types:
-
-```python
-RSS_FEED_CONFIG = [
-    {"url": "https://communistusa.org/feed", "pagination_type": "wordpress"},
-    {"url": "https://marxist.com/index.php?format=feed", "pagination_type": "joomla", "limit_increment": 5},
-    # Add more feeds with appropriate pagination_type and settings
-]
+marxist-chat/
+├── docker-compose.yml     # Docker Compose configuration
+├── nginx.conf             # Nginx configuration
+├── Dockerfile.api         # API service Dockerfile
+├── Dockerfile.llm         # LLM service Dockerfile
+├── .env                   # Environment configuration
+├── initialize.sh          # Initialization script
+├── start.sh               # Service startup script
+├── healthcheck.sh         # Health check script
+├── api_adapter.py         # API service adapter
+├── llm_service.py         # LLM service implementation
+├── src/                   # Application source code
+│   ├── api/               # API implementation
+│   ├── cli/               # Command-line interface
+│   ├── core/              # Core functionality
+│   │   ├── feed_processor.py
+│   │   ├── llm_manager.py
+│   │   ├── metadata_repository.py
+│   │   ├── query_engine.py
+│   │   └── vector_store.py
+│   ├── utils/             # Utility functions
+│   │   ├── redis_helper.py
+│   │   └── ...
+│   ├── app.py             # Web server
+│   └── main.py            # CLI entry point
+├── models/                # LLM model storage
+├── posts_cache/           # Downloaded articles
+├── vector_store/          # Vector database
+├── logs/                  # Application logs
+└── static/                # Web interface files
 ```
-
-### Models
-
-#### Chat Models (smallest to largest):
-- **Qwen 2.5 3B** (Default) - ~2GB download
-- **Qwen 2.5 7B** - ~5GB download
-- **Qwen 2.5 14B** - ~9GB download
-
-#### Embedding Models:
-- **BGE-M3** (Default)
-- **GTE-Small**
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| HOST | Server hostname | 0.0.0.0 |
-| PORT | Server port | 8000 |
-| DEBUG | Enable debug mode | False |
-| MAX_CONCURRENT_USERS | Maximum concurrent users | 30 |
-| QUEUE_TIMEOUT | Queue timeout in seconds | 300 |
-| REQUEST_TIMEOUT | Request timeout in seconds | 120 |
-| CURRENT_LLM | URL to LLM model | Qwen2.5-3B-Instruct GGUF |
-| CURRENT_EMBED | Embedding model name | BAAI/bge-m3 |
-| NUM_THREADS | Number of threads for LLM inference | 4 |
-| TEMPERATURE | Temperature for LLM responses | 0.2 |
-| LOG_LEVEL | Logging level | INFO |
 
 ## Key Features
 
+### Distributed Architecture
+
+- **Horizontal Scaling**: Add more API and LLM containers as needed
+- **Resource Isolation**: Each LLM container has dedicated CPU/memory resources 
+- **Fault Tolerance**: If one container fails, others continue serving requests
+- **Load Distribution**: Efficiently routes traffic based on container availability
+
+### Queue Management
+
+Advanced queue management across instances:
+- Auto-placement of users in queue when server reaches capacity
+- Real-time status updates and position notifications
+- Configurable timeouts and concurrent user limits
+
 ### Incremental Vector Store Updates
 
-The system can now update the vector store with new articles without rebuilding the entire database:
+The system can update the vector store with new articles without rebuilding the entire database:
 
 ```bash
 # CLI Option 10 or via API endpoint:
 curl -X POST http://localhost:8000/api/v1/update-vector-store
 ```
-
-### Enhanced Metadata Repository
-
-Improved document tracking and retrieval with a dedicated metadata index:
-
-- Fast document lookups by filename, title, or source
-- Rich metadata extraction and preservation 
-- Feed source tracking for multi-source setups
-
-### Queue Management
-
-Advanced queue management for the web API:
-- Auto-placement of users in queue when server reaches capacity
-- Real-time status updates and position notifications
-- Configurable timeouts and concurrent user limits
 
 ## API Documentation
 
@@ -150,15 +230,7 @@ Comprehensive API endpoints are available for programmatic integration. See [API
 - **Slow Responses**: Adjust NUM_THREADS setting or use a smaller model
 - **Search Quality Issues**: Rebuild the metadata index with option 9
 - **New Content Not Appearing**: Use option 10 to update the vector store with latest articles
-
-Check the log files in the `logs/` directory for detailed error information.
-
-## Data Storage
-
-- `posts_cache/` - Organized by feed source, contains archived articles
-- `vector_store/` - Contains vector database files
-- `logs/` - Application logs
-- `static/` - Frontend web interface files
+- **Connection Issues**: Check logs with `docker-compose logs -f` for details
 
 ## License
 

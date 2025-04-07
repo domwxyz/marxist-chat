@@ -7,6 +7,7 @@ import requests
 import os
 from typing import Optional, Callable, Any, Dict
 
+from llama_index.core.llms import LLM, CompletionResponse, CompletionResponseGen
 from llama_index.llms.llama_cpp import LlamaCPP
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 import config
@@ -181,8 +182,8 @@ class LLMManager:
             "distributed_mode": config.DISTRIBUTED_MODE
         }
         
-    class RemoteLLM:
-        """Wrapper for remote LLM service that mimics the local LLM interface"""
+    class RemoteLLM(LLM):
+        """Wrapper for remote LLM service that properly implements the LLM interface"""
         
         def __init__(self, service_url):
             self.service_url = service_url
@@ -190,7 +191,7 @@ class LLMManager:
             self.status_url = f"{service_url}/status"
             self.query_url = f"{service_url}/query"
             logger.info(f"Initialized RemoteLLM with service URL: {service_url}")
-            
+        
         def is_healthy(self):
             """Check if the remote LLM service is healthy"""
             try:
@@ -198,7 +199,7 @@ class LLMManager:
                 return response.status_code == 200
             except Exception:
                 return False
-                
+
         def get_status(self):
             """Get status information from the remote LLM service"""
             try:
@@ -208,9 +209,9 @@ class LLMManager:
                 return {"status": "error", "code": response.status_code}
             except Exception as e:
                 return {"status": "error", "message": str(e)}
-                
-        def complete(self, prompt):
-            """Complete a prompt using the remote LLM service"""
+        
+        def complete(self, prompt, **kwargs):
+            """Complete a prompt using the remote LLM service - implements LLM interface"""
             try:
                 response = requests.post(
                     self.query_url,
@@ -230,18 +231,23 @@ class LLMManager:
                             if "token" in data:
                                 full_text += data["token"]
                     
-                    # Return a completion-like object
-                    class CompletionResult:
-                        def __init__(self, text):
-                            self.text = text
-                            
-                        def __str__(self):
-                            return self.text
-                            
-                    return CompletionResult(full_text)
+                    # Return a proper CompletionResponse object
+                    return CompletionResponse(text=full_text)
                 else:
                     raise Exception(f"LLM service error: {response.status_code}")
             except Exception as e:
                 logger.error(f"Error in RemoteLLM.complete: {e}")
                 raise
+                
+        # For newer llama-index versions, implement these methods too
+        def chat(self, messages, **kwargs):
+            """Chat method - just convert messages to a prompt and complete"""
+            # Simple implementation to convert chat to completion
+            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            return self.complete(prompt, **kwargs)
+                
+        async def acomplete(self, prompt, **kwargs):
+            """Async version of complete - required by newer llama-index"""
+            # Use synchronous version since we don't have async requests
+            return self.complete(prompt, **kwargs)
             

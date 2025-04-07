@@ -34,6 +34,8 @@ services:
       - redis
       - llm1
     restart: always
+    ports:
+      - "8001:8000"  # Map container port 8000 to host port 8001
     volumes:
       - ./posts_cache:/app/posts_cache
       - ./vector_store:/app/vector_store
@@ -52,6 +54,8 @@ services:
       - redis
       - llm2
     restart: always
+    ports:
+      - "8002:8000"  # Map container port 8000 to host port 8002
     volumes:
       - ./posts_cache:/app/posts_cache
       - ./vector_store:/app/vector_store
@@ -97,4 +101,3 @@ services:
 
 volumes:
   redis_data:
-  

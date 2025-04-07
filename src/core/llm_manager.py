@@ -185,28 +185,54 @@ class LLMManager:
     class RemoteLLM(LLM):
         """Wrapper for remote LLM service that properly implements the LLM interface"""
         
-        def __init__(self, service_url):
-            """Initialize with service URL"""
-            # Use underscore prefix for attributes to avoid Pydantic validation
-            self._service_url = service_url
-            self._health_url = f"{service_url}/health"
-            self._status_url = f"{service_url}/status"
-            self._query_url = f"{service_url}/query"
+        service_url: str  # Define this as a model field
+        
+        def __init__(self, service_url: str):
+            """Initialize the remote LLM with service URL"""
+            # Initialize the parent class first
+            super().__init__()
+            
+            # Initialize our fields
+            self.service_url = service_url
+            self.health_url = f"{service_url}/health"
+            self.status_url = f"{service_url}/status"
+            self.query_url = f"{service_url}/query"
             logger.info(f"Initialized RemoteLLM with service URL: {service_url}")
         
-        @property
-        def metadata(self):
-            """Get metadata about the model - implement as property"""
-            return {
-                "model_name": "Remote LLM Service",
-                "service_url": self._service_url,
-            }
+        def is_healthy(self):
+            """Check if the remote LLM service is healthy"""
+            try:
+                response = requests.get(self.health_url, timeout=5)
+                return response.status_code == 200
+            except Exception:
+                return False
+
+        def get_status(self):
+            """Get status information from the remote LLM service"""
+            try:
+                response = requests.get(self.status_url, timeout=5)
+                if response.status_code == 200:
+                    return response.json()
+                return {"status": "error", "code": response.status_code}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
         
-        def complete(self, prompt, **kwargs):
+        @property
+        def metadata(self) -> LLMMetadata:
+            """Return metadata about the model"""
+            return LLMMetadata(
+                model_name="Remote LLM Service",
+                model_size="unknown",
+                max_input_size=4096,  # Adjust based on your model's capabilities
+                context_window=4096,
+                is_chat_model=True
+            )
+        
+        def complete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
             """Complete a prompt using the remote LLM service"""
             try:
                 response = requests.post(
-                    self._query_url,
+                    self.query_url,
                     json={
                         "query_text": prompt,
                         "request_id": f"direct_{int(time.time())}"
@@ -231,27 +257,24 @@ class LLMManager:
                 logger.error(f"Error in RemoteLLM.complete: {e}")
                 raise
         
-        def stream_complete(self, prompt, **kwargs):
+        def stream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
             """Streaming completion method"""
             try:
-                # Create a unique request ID
                 request_id = f"stream_{int(time.time())}"
                 
-                # Make a request to the LLM service
                 response = requests.post(
-                    self._query_url,
+                    self.query_url,
                     json={
                         "query_text": prompt,
                         "request_id": request_id
                     },
                     stream=True,
-                    timeout=300  # 5 minute timeout
+                    timeout=300
                 )
                 
                 if response.status_code != 200:
                     raise Exception(f"LLM service error: {response.status_code}")
                 
-                # Stream the response
                 for line in response.iter_lines():
                     if line:
                         data = json.loads(line.decode('utf-8'))
@@ -261,62 +284,33 @@ class LLMManager:
                 logger.error(f"Error in stream_complete: {e}")
                 raise
         
-        def chat(self, messages, **kwargs):
-            """Chat method - convert messages to a prompt and complete"""
+        def chat(self, messages: List[ChatMessage], **kwargs: Any) -> CompletionResponse:
+            """Implement chat by converting messages to a prompt"""
             prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
             return self.complete(prompt, **kwargs)
         
-        def stream_chat(self, messages, **kwargs):
-            """Streaming chat method"""
+        def stream_chat(self, messages: List[ChatMessage], **kwargs: Any) -> CompletionResponseGen:
+            """Implement streaming chat"""
             prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
+            yield from self.stream_complete(prompt, **kwargs)
+        
+        async def acomplete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
+            """Implement async completion by using synchronous version"""
+            # This is not truly async but provides compatibility
+            return self.complete(prompt, **kwargs)
+        
+        async def astream_complete(self, prompt: str, **kwargs: Any) -> CompletionResponseGen:
+            """Implement async streaming by using synchronous version"""
+            # This is not truly async but provides compatibility
             for token in self.stream_complete(prompt, **kwargs):
                 yield token
         
-        async def acomplete(self, prompt, **kwargs):
-            """Async completion method"""
-            return self.complete(prompt, **kwargs)
+        async def achat(self, messages: List[ChatMessage], **kwargs: Any) -> CompletionResponse:
+            """Implement async chat by using synchronous version"""
+            return self.chat(messages, **kwargs)
         
-        async def astream_complete(self, prompt, **kwargs):
-            """Async streaming completion method"""
-            try:
-                request_id = f"stream_{int(time.time())}"
-                
-                # Use aiohttp for async requests
-                import aiohttp
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        self._query_url,
-                        json={
-                            "query_text": prompt,
-                            "request_id": request_id
-                        },
-                        timeout=300
-                    ) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
-                            raise Exception(f"LLM service error: {response.status}, {error_text}")
-                        
-                        # Stream the response
-                        async for line in response.content:
-                            line = line.decode('utf-8').strip()
-                            if not line:
-                                continue
-                            
-                            data = json.loads(line)
-                            if "token" in data:
-                                yield data["token"]
-            except Exception as e:
-                logger.error(f"Error in astream_complete: {e}")
-                raise
-        
-        async def achat(self, messages, **kwargs):
-            """Async chat method"""
-            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
-            return await self.acomplete(prompt, **kwargs)
-        
-        async def astream_chat(self, messages, **kwargs):
-            """Async streaming chat method"""
-            prompt = "\n".join([f"{m.role}: {m.content}" for m in messages])
-            async for token in self.astream_complete(prompt, **kwargs):
+        async def astream_chat(self, messages: List[ChatMessage], **kwargs: Any) -> CompletionResponseGen:
+            """Implement async streaming chat by using synchronous version"""
+            for token in self.stream_chat(messages, **kwargs):
                 yield token
             

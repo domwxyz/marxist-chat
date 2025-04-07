@@ -1,3 +1,4 @@
+from platform import java_ver
 import shutil
 from pathlib import Path
 from datetime import datetime
@@ -275,12 +276,17 @@ class VectorStoreManager:
             
         try:
             # Initialize LLM and embedding model
-            llm = LLMManager.initialize_llm()
+
             embed_model = LLMManager.initialize_embedding_model()
-            
-            # Configure settings
-            Settings.llm = llm
             Settings.embed_model = embed_model
+
+            try:
+                llm = LLMManager.initialize_llm()
+                Settings.llm = llm
+            except Exception as e:
+                # Handle LLM initialization error but continue loading vector store
+                print(f"Warning: Failed to initialize LLM, will continue with vector store: {e}")
+            
             Settings.node_parser = SentenceSplitter(
                 chunk_size=CHUNK_SIZE,
                 chunk_overlap=CHUNK_OVERLAP,

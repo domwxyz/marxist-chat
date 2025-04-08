@@ -1,6 +1,21 @@
 version: '3.8'
 
 services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"  # For HTTPS if you set it up
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./static:/usr/share/nginx/html/static
+    depends_on:
+      - api1
+      - api2
+    restart: always
+    networks:
+      - marxist_net
+
   redis:
     image: redis:alpine
     ports:
@@ -9,6 +24,8 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    networks:
+      - marxist_net
 
   api1:
     build:
@@ -23,12 +40,15 @@ services:
       - redis
       - llm1
     restart: always
-    ports:
-      - "8001:8000"  # Map container port 8000 to host port 8001
+    # Remove port mapping - Nginx will handle external access
+    # ports:
+    #   - "8001:8000"
     volumes:
       - ./posts_cache:/app/posts_cache
       - ./vector_store:/app/vector_store
       - ./logs:/app/logs
+    networks:
+      - marxist_net
 
   api2:
     build:
@@ -43,12 +63,15 @@ services:
       - redis
       - llm2
     restart: always
-    ports:
-      - "8002:8000"  # Map container port 8000 to host port 8002
+    # Remove port mapping - Nginx will handle external access
+    # ports:
+    #   - "8002:8000"
     volumes:
       - ./posts_cache:/app/posts_cache
       - ./vector_store:/app/vector_store
       - ./logs:/app/logs
+    networks:
+      - marxist_net
 
   llm1:
     build:
@@ -58,7 +81,7 @@ services:
       - NUM_THREADS=3
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-      - DISTRIBUTED_MODE=false
+      - DISTRIBUTED_MODE=true
     deploy:
       resources:
         limits:
@@ -69,6 +92,8 @@ services:
       - ./models:/app/models
       - ./vector_store:/app/vector_store:rw
       - ./llm_logs:/app/logs
+    networks:
+      - marxist_net
 
   llm2:
     build:
@@ -78,7 +103,7 @@ services:
       - NUM_THREADS=3
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-      - DISTRIBUTED_MODE=false
+      - DISTRIBUTED_MODE=true
     deploy:
       resources:
         limits:
@@ -89,6 +114,13 @@ services:
       - ./models:/app/models
       - ./vector_store:/app/vector_store:rw
       - ./llm_logs:/app/logs
+    networks:
+      - marxist_net
+
+networks:
+  marxist_net:
+    driver: bridge
 
 volumes:
   redis_data:
+  

@@ -299,8 +299,12 @@ class VectorStoreManager:
             collection_name = "articles"
 
             # Check if the collection exists
-            collection_names = self.chroma_client.list_collections()  # Now directly returns names
-            print(f"Found collections: {collection_names}")
+            collections = self.chroma_client.list_collections()
+            print(f"Found collections: {collections}")
+
+            # Extract actual collection names from the Collection objects
+            collection_names = [c.name for c in collections]
+            print(f"Collection names: {collection_names}")
 
             if not collection_names or collection_name not in collection_names:
                 print(f"No collection named '{collection_name}' found in ChromaDB")

@@ -58,6 +58,7 @@ services:
       - NUM_THREADS=3
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+      - DISTRIBUTED_MODE=false
     deploy:
       resources:
         limits:
@@ -66,7 +67,7 @@ services:
     restart: always
     volumes:
       - ./models:/app/models
-      - ./vector_store:/app/vector_store
+      - ./vector_store:/app/vector_store:rw
       - ./llm_logs:/app/logs
 
   llm2:
@@ -77,6 +78,7 @@ services:
       - NUM_THREADS=3
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
+      - DISTRIBUTED_MODE=false
     deploy:
       resources:
         limits:
@@ -85,9 +87,8 @@ services:
     restart: always
     volumes:
       - ./models:/app/models
-      - ./vector_store:/app/vector_store
+      - ./vector_store:/app/vector_store:rw
       - ./llm_logs:/app/logs
 
 volumes:
   redis_data:
-  

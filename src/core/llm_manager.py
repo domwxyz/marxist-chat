@@ -185,12 +185,13 @@ class LLMManager:
     class RemoteLLM(LLM):
         """Wrapper for remote LLM service that properly implements the LLM interface"""
         
-        service_url: str  # Define this as a model field
+        # Define service_url as a class attribute for Pydantic
+        service_url: str
         
         def __init__(self, service_url: str):
             """Initialize the remote LLM with service URL"""
             # Initialize the parent class first
-            super().__init__()
+            super().__init__(service_url=service_url)
             
             # Initialize our fields
             self.service_url = service_url

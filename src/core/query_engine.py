@@ -177,6 +177,9 @@ class QueryEngine:
                 "<|im_start|>assistant\n"
             )
             
+            llm = LLMManager.initialize_llm()
+            Settings.llm = llm
+            
             # Create a streaming query engine
             self.query_engine = self.index.as_query_engine(
                 similarity_top_k=5,

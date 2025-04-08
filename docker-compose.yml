@@ -9,7 +9,7 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-      
+
   api1:
     build:
       context: .
@@ -59,6 +59,9 @@ services:
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
       - DISTRIBUTED_MODE=false
+      - PORT=5000  # Add this to explicitly set the port
+    ports:
+      - "5000:5000"
     deploy:
       resources:
         limits:
@@ -79,6 +82,9 @@ services:
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
       - DISTRIBUTED_MODE=false
+      - PORT=5000  # Add this to explicitly set the port
+    ports:
+      - "5001:5000"
     deploy:
       resources:
         limits:

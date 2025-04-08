@@ -81,7 +81,7 @@ services:
       - NUM_THREADS=3
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-      - DISTRIBUTED_MODE=true
+      - DISTRIBUTED_MODE=false
     deploy:
       resources:
         limits:
@@ -103,7 +103,7 @@ services:
       - NUM_THREADS=3
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
-      - DISTRIBUTED_MODE=true
+      - DISTRIBUTED_MODE=false
     deploy:
       resources:
         limits:
@@ -123,4 +123,3 @@ networks:
 
 volumes:
   redis_data:
-  

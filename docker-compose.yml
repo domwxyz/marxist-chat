@@ -1,21 +1,6 @@
 version: '3.8'
 
 services:
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"  # For HTTPS if you set it up
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./static:/usr/share/nginx/html/static
-    depends_on:
-      - api1
-      - api2
-    restart: always
-    networks:
-      - marxist_net
-
   redis:
     image: redis:alpine
     ports:
@@ -24,8 +9,6 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
-    networks:
-      - marxist_net
 
   api1:
     build:
@@ -40,15 +23,12 @@ services:
       - redis
       - llm1
     restart: always
-    # Remove port mapping - Nginx will handle external access
-    # ports:
-    #   - "8001:8000"
+    ports:
+      - "8001:8000"  # Map container port 8000 to host port 8001
     volumes:
       - ./posts_cache:/app/posts_cache
       - ./vector_store:/app/vector_store
       - ./logs:/app/logs
-    networks:
-      - marxist_net
 
   api2:
     build:
@@ -63,15 +43,12 @@ services:
       - redis
       - llm2
     restart: always
-    # Remove port mapping - Nginx will handle external access
-    # ports:
-    #   - "8002:8000"
+    ports:
+      - "8002:8000"  # Map container port 8000 to host port 8002
     volumes:
       - ./posts_cache:/app/posts_cache
       - ./vector_store:/app/vector_store
       - ./logs:/app/logs
-    networks:
-      - marxist_net
 
   llm1:
     build:
@@ -92,8 +69,6 @@ services:
       - ./models:/app/models
       - ./vector_store:/app/vector_store:rw
       - ./llm_logs:/app/logs
-    networks:
-      - marxist_net
 
   llm2:
     build:
@@ -114,12 +89,7 @@ services:
       - ./models:/app/models
       - ./vector_store:/app/vector_store:rw
       - ./llm_logs:/app/logs
-    networks:
-      - marxist_net
-
-networks:
-  marxist_net:
-    driver: bridge
 
 volumes:
   redis_data:
+  

@@ -10,6 +10,17 @@ services:
     volumes:
       - redis_data:/data
 
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      - ./static:/usr/share/nginx/html  # Mount your static files
+    depends_on:
+      - api1
+      - api2
+
   api1:
     build:
       context: .
@@ -92,4 +103,3 @@ services:
 
 volumes:
   redis_data:
-  

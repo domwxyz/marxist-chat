@@ -187,14 +187,16 @@ class LLMManager:
         
         # Define service_url as a class attribute for Pydantic
         service_url: str
+        health_url: str = None
+        status_url: str = None
+        query_url: str = None
         
         def __init__(self, service_url: str):
             """Initialize the remote LLM with service URL"""
-            # Initialize the parent class first
+            # Initialize the parent class with the service_url
             super().__init__(service_url=service_url)
             
-            # Initialize our fields
-            self.service_url = service_url
+            # Set the URLs after initialization
             self.health_url = f"{service_url}/health"
             self.status_url = f"{service_url}/status"
             self.query_url = f"{service_url}/query"

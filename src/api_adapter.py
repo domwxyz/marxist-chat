@@ -2,7 +2,9 @@ import os
 import sys
 import json
 import logging
+import traceback
 import time
+import aiohttp
 import asyncio
 import uuid
 import requests
@@ -212,11 +214,12 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                 if request_id:
                     try:
                         # Send stop request to LLM service
-                        response = requests.post(
-                            f"{LLM_SERVICE_URL}/stop",
-                            json={"request_id": request_id},
-                            timeout=5
-                        )
+                        async with aiohttp.ClientSession() as session:
+                            await session.post(
+                                f"{LLM_SERVICE_URL}/stop",
+                                json={"request_id": request_id},
+                                timeout=5
+                            )
                         
                         # Notify client
                         await websocket.send_json({
@@ -266,91 +269,109 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                 "type": "stream_start"
             })
             
-            # Send request to LLM service
+            # Send request to LLM service using aiohttp
             try:
-                # Create the streaming request to the LLM service
-                response = requests.post(
-                    f"{LLM_SERVICE_URL}/query",
-                    json={
-                        "query_text": query_text, 
-                        "request_id": request_id,
-                        "start_date": message_data.get("start_date"),
-                        "end_date": message_data.get("end_date")
-                    },
-                    stream=True,
-                    timeout=300  # 5 minute timeout
-                )
-                
-                # Stream the response back to the client
-                full_response = ""
-                sources = None
-                
-                if response.status_code == 200:
-                    # Process streaming response
-                    for line in response.iter_lines():
-                        if line:
-                            try:
-                                # Parse the JSON line
-                                data = json.loads(line.decode('utf-8'))
+                # Create the streaming request to the LLM service using aiohttp
+                async with aiohttp.ClientSession() as session:
+                    try:
+                        async with session.post(
+                            f"{LLM_SERVICE_URL}/query",
+                            json={
+                                "query_text": query_text, 
+                                "request_id": request_id,
+                                "start_date": message_data.get("start_date"),
+                                "end_date": message_data.get("end_date")
+                            },
+                            timeout=aiohttp.ClientTimeout(total=300)  # 5 minute timeout
+                        ) as response:
+                            if response.status != 200:
+                                error_text = await response.text()
+                                logger.error(f"LLM service error: {response.status}, {error_text}")
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "message": f"LLM service error: {response.status}"
+                                })
+                                continue
+                            
+                            # Stream the response
+                            full_response = ""
+                            sources = None
+                            
+                            # Process the streaming response line by line
+                            async for line in response.content:
+                                line_text = line.decode('utf-8').strip()
+                                if not line_text:
+                                    continue
                                 
-                                # Process the different response types
-                                if "token" in data:
-                                    token = data["token"]
-                                    full_response += token
+                                try:
+                                    # Parse the JSON line
+                                    data = json.loads(line_text)
                                     
-                                    # Forward to client
-                                    await websocket.send_json({
-                                        "type": "stream_token",
-                                        "data": token
-                                    })
-                                    
-                                elif "sources" in data:
-                                    sources = data["sources"]
-                                    
-                                elif "status" in data:
-                                    if data["status"] == "complete":
-                                        # Query complete
+                                    # Process the different response types
+                                    if "token" in data:
+                                        token = data["token"]
+                                        full_response += token
+                                        
+                                        # Forward to client
                                         await websocket.send_json({
-                                            "type": "stream_end",
-                                            "data": full_response
+                                            "type": "stream_token",
+                                            "data": token
                                         })
                                         
-                                        # Send sources if available
-                                        if sources:
+                                    elif "sources" in data:
+                                        sources = data["sources"]
+                                        
+                                        # Forward sources to client
+                                        await websocket.send_json({
+                                            "type": "sources",
+                                            "data": sources
+                                        })
+                                        
+                                    elif "status" in data:
+                                        if data["status"] == "complete":
+                                            # Query complete
                                             await websocket.send_json({
-                                                "type": "sources",
-                                                "data": sources
+                                                "type": "stream_end",
+                                                "data": full_response
+                                            })
+                                            
+                                        elif data["status"] == "stopped":
+                                            # Query was stopped
+                                            await websocket.send_json({
+                                                "type": "query_stopped",
+                                                "message": "Query was stopped by user request."
                                             })
                                     
-                                    elif data["status"] == "stopped":
-                                        # Query was stopped
+                                    elif "error" in data:
+                                        # Handle error
                                         await websocket.send_json({
-                                            "type": "query_stopped",
-                                            "message": "Query was stopped by user request."
+                                            "type": "error",
+                                            "message": data["error"]
                                         })
                                 
-                                elif "error" in data:
-                                    # Handle error
-                                    await websocket.send_json({
-                                        "type": "error",
-                                        "message": data["error"]
-                                    })
-                            
-                            except json.JSONDecodeError:
-                                logger.error(f"Invalid JSON in LLM response: {line}")
-                                continue
-                else:
-                    # Handle non-200 response
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": f"LLM service error: {response.status_code}"
-                    })
-            
-            except requests.RequestException as e:
-                logger.error(f"Error communicating with LLM service: {e}")
+                                except json.JSONDecodeError:
+                                    logger.error(f"Invalid JSON in LLM response: {line_text}")
+                                except Exception as e:
+                                    logger.error(f"Error processing response line: {str(e)}")
+                                    logger.error(traceback.format_exc())
+                    except aiohttp.ClientError as e:
+                        logger.error(f"AIOHTTP client error: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": f"Error communicating with LLM service: {str(e)}"
+                        })
+                    except asyncio.TimeoutError:
+                        logger.error(f"Timeout communicating with LLM service")
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Request timed out"
+                        })
+            except Exception as e:
+                logger.error(f"Unhandled error in handle_chat: {e}")
+                logger.error(traceback.format_exc())
                 await websocket.send_json({
                     "type": "error",
-                    "message": f"Error communicating with LLM service: {str(e)}"
+                    "message": f"Unexpected error: {str(e)}"
                 })
             
             # Clean up queue data
@@ -359,6 +380,7 @@ async def handle_chat(websocket: WebSocket, user_id: str):
     
     except Exception as e:
         logger.error(f"Error in chat handler for {user_id}: {e}")
+        logger.error(traceback.format_exc())
     finally:
         # Clean up when the connection closes
         if user_id in active_connections:

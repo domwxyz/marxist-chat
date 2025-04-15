@@ -276,7 +276,6 @@ class VectorStoreManager:
             
         try:
             # Initialize LLM and embedding model
-
             embed_model = LLMManager.initialize_embedding_model()
             Settings.embed_model = embed_model
 
@@ -302,11 +301,8 @@ class VectorStoreManager:
             collections = self.chroma_client.list_collections()
             print(f"Found collections: {collections}")
 
-            # Extract actual collection names from the Collection objects
-            collection_names = [c.name for c in collections]
-            print(f"Collection names: {collection_names}")
-
-            if not collection_names or collection_name not in collection_names:
+            # In Chroma v0.6.0, list_collections already returns just the names
+            if not collections or collection_name not in collections:
                 print(f"No collection named '{collection_name}' found in ChromaDB")
                 return None
 

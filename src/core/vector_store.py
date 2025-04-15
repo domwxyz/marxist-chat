@@ -275,7 +275,7 @@ class VectorStoreManager:
             return None
             
         try:
-            # Initialize LLM and embedding model
+            # Initialize embedding model
             embed_model = LLMManager.initialize_embedding_model()
             Settings.embed_model = embed_model
 
@@ -297,17 +297,32 @@ class VectorStoreManager:
             self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_dir))
             collection_name = "articles"
 
-            # Check if the collection exists
+            # Check if the collection exists - handle both API versions
             collections = self.chroma_client.list_collections()
             print(f"Found collections: {collections}")
-
-            # In Chroma v0.6.0, list_collections already returns just the names
-            if not collections or collection_name not in collections:
-                print(f"No collection named '{collection_name}' found in ChromaDB")
-                return None
-
-            # Get the collection
-            self.chroma_collection = self.chroma_client.get_collection(collection_name)
+            
+            # Robust collection checking that works with both string names and objects
+            try:
+                # First approach: try to get the collection directly
+                self.chroma_collection = self.chroma_client.get_collection(collection_name)
+                print(f"Successfully accessed collection '{collection_name}'")
+            except Exception as e:
+                print(f"Error getting collection directly: {e}")
+                
+                # Second approach: check if any collection matches our target name
+                collection_found = False
+                for collection in collections:
+                    # Handle both string names and Collection objects
+                    coll_name = collection if isinstance(collection, str) else getattr(collection, 'name', None)
+                    if coll_name == collection_name:
+                        collection_found = True
+                        self.chroma_collection = self.chroma_client.get_collection(collection_name)
+                        print(f"Found collection '{collection_name}' through name matching")
+                        break
+                        
+                if not collection_found:
+                    print(f"No collection named '{collection_name}' found in ChromaDB")
+                    return None
 
             vector_store = ChromaVectorStore(chroma_collection=self.chroma_collection)
             

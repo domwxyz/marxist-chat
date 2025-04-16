@@ -55,11 +55,11 @@ services:
       context: .
       dockerfile: Dockerfile.llm
     environment:
-      - NUM_THREADS=3
+      - NUM_THREADS=1
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
       - DISTRIBUTED_MODE=false
-      - PORT=5000  # Add this to explicitly set the port
+      - PORT=5000
     ports:
       - "5000:5000"
     deploy:
@@ -78,11 +78,11 @@ services:
       context: .
       dockerfile: Dockerfile.llm
     environment:
-      - NUM_THREADS=3
+      - NUM_THREADS=1
       - TEMPERATURE=0.2
       - CURRENT_LLM=https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf
       - DISTRIBUTED_MODE=false
-      - PORT=5000  # Add this to explicitly set the port
+      - PORT=5000
     ports:
       - "5001:5000"
     deploy:

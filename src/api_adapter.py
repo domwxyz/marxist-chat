@@ -272,12 +272,7 @@ async def handle_chat(websocket: WebSocket, user_id: str):
             # Send request to LLM service using aiohttp
             try:
                 # Create the streaming request to the LLM service using aiohttp
-                async with aiohttp.ClientSession(
-                    connector=aiohttp.TCPConnector(
-                        limit=10,  # Increase connection pool
-                        keepalive_timeout=60.0  # Keep connections warm
-                    )
-                ) as session:
+                async with aiohttp.ClientSession() as session:
                     try:
                         async with session.post(
                             f"{LLM_SERVICE_URL}/query",
@@ -287,7 +282,7 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                                 "start_date": message_data.get("start_date"),
                                 "end_date": message_data.get("end_date")
                             },
-                            timeout=aiohttp.ClientTimeout(total=600)  # 10 minute timeout
+                            timeout=aiohttp.ClientTimeout(total=300)  # 5 minute timeout
                         ) as response:
                             if response.status != 200:
                                 error_text = await response.text()

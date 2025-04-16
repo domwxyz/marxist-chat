@@ -97,7 +97,7 @@ class LLMManager:
                 max_new_tokens=256,
                 context_window=4096,
                 model_kwargs={"n_threads": threads, 
-                              "n_batch": 256, 
+                              "n_batch": 512, 
                               "use_mlock": True},
                 verbose=False
             )

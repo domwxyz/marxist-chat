@@ -282,7 +282,7 @@ async def handle_chat(websocket: WebSocket, user_id: str):
                                 "start_date": message_data.get("start_date"),
                                 "end_date": message_data.get("end_date")
                             },
-                            timeout=aiohttp.ClientTimeout(total=300)  # 5 minute timeout
+                            timeout=aiohttp.ClientTimeout(total=600)  # 10 minute timeout
                         ) as response:
                             if response.status != 200:
                                 error_text = await response.text()

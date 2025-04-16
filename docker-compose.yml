@@ -19,6 +19,8 @@ services:
       - LLM_SERVICE_URL=http://llm1:5000
       - PORT=8000
       - API_ID=1
+      - REQUEST_TIMEOUT=300
+      - QUEUE_TIMEOUT=600
     depends_on:
       - redis
       - llm1
@@ -39,6 +41,8 @@ services:
       - LLM_SERVICE_URL=http://llm2:5000
       - PORT=8000
       - API_ID=2
+      - REQUEST_TIMEOUT=300
+      - QUEUE_TIMEOUT=600
     depends_on:
       - redis
       - llm2

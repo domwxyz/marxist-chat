@@ -659,8 +659,8 @@
             let inQueue = false;
             let queuePosition = 0;
             let estimatedWaitTime = 0;
-            const IDLE_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-            const CONNECTION_TIMEOUT = 10 * 1000; // 10 seconds
+            const IDLE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+            const CONNECTION_TIMEOUT = 15 * 1000; // 15 seconds
             
             // Force hide typing indicator on page load
             document.addEventListener('DOMContentLoaded', function() {
@@ -1133,14 +1133,15 @@
                         stopBtn.classList.remove('hidden');
                         sendBtn.disabled = true;
                         
-                        // Hide typing indicator since we're now getting actual content
-                        hideTypingIndicator();
+                        // Keep typing indicator visible
+                        showTypingIndicator();
                         break;
                     
                     case 'stream_token':
                         if (isStreaming && currentStreamElement) {
                             // We're actively streaming content, not just "thinking"
                             isWaitingForResponse = false;
+                            hideTypingIndicator();
                             
                             // Add each token immediately to the displayed message
                             streamingMessage += data.data;

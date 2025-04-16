@@ -57,7 +57,7 @@ request_queue = Queue(maxsize=20)  # Limit queue to prevent memory issues
 NUM_THREADS = int(os.getenv("NUM_THREADS", "3"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
 MODEL_URL = os.getenv("CURRENT_LLM", 
-                     "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf")
+                     "https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf")
 MODEL_LOCAL_PATH = os.path.join("models", os.path.basename(MODEL_URL))
 
 # Request models
